@@ -37,10 +37,10 @@ The workflow is built entirely in **n8n** and divided into four core phases:
 - **Comms:** Gmail API, HTTP Requests
 
 ## 🚀 How to Use / Install
-1. Clone this repository and import the [Real_Estate_DealFlow_Automation.json](cci:7://file:///Users/divinejude/Real-Estate-Automation/Real_Estate_DealFlow_Automation.json:0:0-0:0) file into your n8n instance.
+1. Clone this repository and import the Real_Estate_DealFlow_Automation.json file into your n8n instance.
 2. Connect your credentials:
    - `Airtable Personal Access Token`
    - `Gmail API OAuth2`
-   - `OpenAI/Groq API Key`
+   - `API Key`
 3. Update the Airtable Base/Table IDs in the respective nodes.
 4. Activate the schedule trigger or run manually.
