@@ -21,6 +21,6 @@ My work focuses on leveraging tools like **n8n, LangChain, LLMs (Groq, OpenAI, A
 - **Data Engineering:** Web scraping, DOM parsing, Regex cleanups, and syncing scalable databases (Airtable, PostgreSQL).
 ## 📫 Contact
 If you'd like to discuss building out AI automations for your business, feel free to reach out.
-- **LinkedIn:** [Your LinkedIn URL]
-- **Email:** [Your Email]
-- **Website:** [Your Website]
+- [**LinkedIn:**](https://www.linkedin.com/in/divinejude/)
+- **Email:** (mailto:Judedivine9@gmail.com)
+- [**X:**](https://x.com/DivTalent)
