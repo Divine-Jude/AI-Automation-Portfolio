@@ -6,7 +6,7 @@ My work focuses on leveraging tools like **n8n, LangChain, LLMs (Groq, OpenAI, A
 ---
 ## 📂 Projects Directory
 *Below is a living index of my major automation projects. Click into any folder for full architectural documentation, workflow JSONs, and implementation guides.*
-### [1. Real Estate Dealflow & Due Diligence Automation](./Real_Estate_DealFlow_Automation/)
+### [1. Real Estate Dealflow & Due Diligence Automation](https://github.com/Divine-Jude/AI-Automation-Portfolio/tree/main/Real%20Estate%20Deal%20Flow)
 **Tech Stack:** `n8n`, `Llama-3`, `LangChain`, `Airtable`, `Gmail API`
 - **Description:** An autonomous acquisition system that scrapes property listings, filters them against rigid investment criteria using LLMs, routes them to CRM bases, and auto-negotiates/analyzes PDF title documents (C of O, survey plans) from brokers.
 - **Business Value:** Replaces a junior analyst and paralegal by entirely automating deal sourcing and preliminary legal document verification.
