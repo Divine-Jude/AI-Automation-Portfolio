@@ -1,3 +1,7 @@
+<img width="1376" alt="Gemini_Generated_Image_j88ji4j88ji4j88j" src="https://github.com/user-attachments/assets/d9e01390-ef36-4415-8af6-f1e6a2eb5ba4" />
+
+---
+
 # AI-Powered Real Estate Dealflow
 
 An autonomous n8n workflow that completely automates real estate deal sourcing, AI-driven investment analysis, broker outreach, and preliminary legal document verification. 
