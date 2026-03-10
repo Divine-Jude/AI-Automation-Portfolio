@@ -1,4 +1,4 @@
-# AI-Powered Real Estate Dealflow & Due Diligence Automation
+# AI-Powered Real Estate Dealflow
 
 An autonomous n8n workflow that completely automates real estate deal sourcing, AI-driven investment analysis, broker outreach, and preliminary legal document verification. 
 
