@@ -50,4 +50,4 @@ Many automation tools create a "Deal" in the CRM the moment a form is submitted.
 ---
 
 **Divine Jude** — AI Automation Engineer
-[LinkedIn](https://linkedin.com) · [Medium](https://medium.com)
+[LinkedIn](https://www.linkedin.com/in/divinejude/) · [Medium](https://medium.com/@Divinz)
