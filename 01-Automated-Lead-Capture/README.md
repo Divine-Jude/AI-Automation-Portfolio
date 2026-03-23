@@ -1,5 +1,7 @@
 # AI Inbound Sales Pipeline
 
+![ai_sales_pipeline_cover_1774238043028](https://github.com/user-attachments/assets/65ade3f4-512f-4503-9928-62a1a03ee763)
+
 A system built to solve one of the most expensive problems in B2B sales: Sales Development Representatives (SDRs) wasting 80% of their day on research and data entry instead of actually talking to prospects.
 
 When someone fills out a contact form, this n8n workflow scores the lead, pulls their company's financial data via Apollo, runs an AI research agent to find live news and case studies, writes everything to HubSpot, and pings the team on Slack. 
