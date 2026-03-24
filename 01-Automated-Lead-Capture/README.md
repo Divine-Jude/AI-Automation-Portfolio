@@ -2,6 +2,7 @@
 
 <img width="1440" height="900" alt="Screenshot 2026-03-23 at 4 04 38 AM" src="https://github.com/user-attachments/assets/7dc2ff84-4cc5-43f5-b6f7-a3456dd028c8" />
 
+---
 A system built to solve one of the most expensive problems in B2B sales: Sales Development Representatives (SDRs) wasting 80% of their day on research and data entry instead of actually talking to prospects.
 
 When someone fills out a contact form, this n8n workflow scores the lead, pulls their company's financial data via Apollo, runs an AI research agent to find live news and case studies, writes everything to HubSpot, and pings the team on Slack. 
