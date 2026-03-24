@@ -1,4 +1,4 @@
-<img width="1376" alt="Gemini_Generated_Image_j88ji4j88ji4j88j" src="https://github.com/user-attachments/assets/d9e01390-ef36-4415-8af6-f1e6a2eb5ba4" />
+<img width="1440" height="900" alt="Real Est Automation" src="https://github.com/user-attachments/assets/511a1837-de04-488a-9ec0-1ec156fcfe0f" />
 
 ---
 
@@ -48,3 +48,5 @@ The workflow is built entirely in **n8n** and divided into four core phases:
    - `API Key`
 3. Update the Airtable Base/Table IDs in the respective nodes.
 4. Activate the schedule trigger or run manually.
+
+
