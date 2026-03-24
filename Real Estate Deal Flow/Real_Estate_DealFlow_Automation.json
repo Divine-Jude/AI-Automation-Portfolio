@@ -1,0 +1,1334 @@
+{
+  "name": "Real Estate Deal Flow Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\nconst properties = [];\n\nfor (const item of allItems) {\n  const html = item.json.data || '';\n\n  // Split HTML by each property-listing card\n  const cards = html.split(/class=\"property-listing\"/);\n  // Skip the first chunk (before the first card)\n  for (let c = 1; c < cards.length; c++) {\n    const card = cards[c];\n\n    // Title + URL: from .pl-title h3 > a\n    const titleMatch = card.match(/class=\"pl-title\"[\\s\\S]*?<h3[^>]*>\\s*<a[^>]*href=[\"']([^\"']+)[\"'][^>]*>([^<]+)<\\/a>/i);\n    const title = titleMatch ? titleMatch[2].trim() : '';\n    const urlPath = titleMatch ? titleMatch[1].trim() : '';\n\n    // Location: from .pl-title p (first <p> inside pl-title)\n    const locMatch = card.match(/class=\"pl-title\"[\\s\\S]*?<p[^>]*>([^<]+)<\\/p>/i);\n    const location = locMatch ? locMatch[1].trim() : '';\n\n    // Price: from .pl-price h3\n    const priceMatch = card.match(/class=\"pl-price\"[\\s\\S]*?<h3[^>]*>([\\s\\S]*?)<\\/h3>/i);\n    let priceText = priceMatch ? priceMatch[1].replace(/<[^>]+>/g, '').trim() : '';\n\n    // Clean price to numeric\n    const priceStr = priceText.replace(/[\\u20A6,\\s]/g, '');\n    const priceNumeric = parseInt(priceStr) || 0;\n\n    // Property type detection\n    const t = title.toLowerCase();\n    let propertyType = 'Other';\n    if (t.includes('detached') && !t.includes('semi')) propertyType = 'Detached Duplex';\n    else if (t.includes('semi')) propertyType = 'Semi-Detached Duplex';\n    else if (t.includes('terrace')) propertyType = 'Terrace';\n    else if (t.includes('flat') || t.includes('apartment')) propertyType = 'Flat/Apartment';\n    else if (t.includes('land') || t.includes('plot')) propertyType = 'Land/Plot';\n    else if (t.includes('commercial')) propertyType = 'Commercial';\n\n    // Bedrooms from title\n    const bedMatch = title.match(/(\\d+)\\s*(?:bed(?:room)?s?|beds?)\\b/i)\n               || title.match(/\\b(one|two|three|four|five|six)\\s*(?:bed(?:room)?s?)\\b/i);\n\nlet bedrooms = 0;\nif (bedMatch) {\n  const wordToNum = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };\n  const val = bedMatch[1].toLowerCase();\n  bedrooms = parseInt(val) || wordToNum[val] || 0;\n}\n\n    if (title) {\n      properties.push({\n        json: {\n          title,\n          price_raw: priceText,\n          price_numeric: priceNumeric,\n          location,\n          url: urlPath ? 'https://www.propertypro.ng' + urlPath : null,\n          bedrooms,\n          property_type: propertyType\n        }\n      });\n    }\n  }\n}\n\nreturn properties;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        2048
+      ],
+      "id": "7ab76399-4e31-4348-8c5c-fc533162cace",
+      "name": "Extract & Normalize Listings"
+    },
+    {
+      "parameters": {
+        "jsCode": "const totalPages = 5;\nconst pages = [];\nfor (let i = 1; i <= totalPages; i++) {\n  const url = i === 1 ? 'https://www.propertypro.ng/property-for-sale/in/lagos' : 'https://www.propertypro.ng/property-for-sale/in/lagos?page=' + i;\n  pages.push({ json: { pageUrl: url } });\n}\nreturn pages;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        2048
+      ],
+      "id": "1b2e7ec5-8f03-4999-81cb-c4b334e43323",
+      "name": "Generate Pages"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2064,
+        2048
+      ],
+      "id": "4356c0a0-bf05-46e4-bdc4-5626c45d3bd9",
+      "name": "Loop Over Listings"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2288,
+        1760
+      ],
+      "id": "65371c88-8c82-4d51-99ce-72df5b03251d",
+      "name": "Wait",
+      "webhookId": "5994a3bd-c31a-4828-a5aa-5a62c8ba6bf9"
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = $('Scrape Agent Contacts').first().json;\nconst aiOutput = $input.first().json;\n\nlet aiResult = {};\ntry {\n  const text = aiOutput.output || aiOutput.text || '{}';\n  const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);\n  aiResult = jsonMatch ? JSON.parse(jsonMatch[0]) : {};\n} catch (e) {\n  aiResult = { score: 0, recommendation: 'SKIP', evaluation: 'Failed to parse AI response' };\n}\n\nreturn [{\n  json: {\n    ...original,\n    ai_score: aiResult.score || 0,\n    ai_recommendation: aiResult.recommendation || 'SKIP',\n    ai_evaluation: aiResult.evaluation || 'No analysis'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        1760
+      ],
+      "id": "01f37c07-47d0-4d6b-a096-c120c17668ee",
+      "name": "Merge AI Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ai_recommendation }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "BUY",
+              "id": "660a3f84-b021-4852-a39f-03c422db3340"
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2288,
+        2048
+      ],
+      "id": "f3a78fbc-068a-4922-8edb-f2eba0fe2415",
+      "name": "Filter BUY"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.data || '';\nconst listing = $('Loop Over Listings').first().json;\nconst scrape = (r) => (html.match(r) || [])[1] || '';\n\nlet rawDesc = '';\nconst descBlock = html.match(/<h2>\\s*Description\\s*<\\/h2>\\s*<div[^>]*class=\"des-inner[^\"]*\">([\\s\\S]*?)<div>\\s*<\\/div>/i);\nif (descBlock) {\n  rawDesc = descBlock[1];\n} else {\n  rawDesc = scrape(/property=\"og:description\"[^>]*content=\"([^\"]+)\"/);\n}\n\n// Clean and format description\nlet description = rawDesc\n  .replace(/<br\\s*\\/?>/gi, '\\n')\n  .replace(/<[^>]+>/g, '')\n  .replace(/&amp;/g, '&')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  .replace(/\\*+/g, '')\n  .trim();\n\n\ndescription = description.replace(/ - (?=[A-Z0-9])/g, '\\n- ');\n\n// Format section headers on their own lines\ndescription = description\n  .replace(/Key Features:\\s*/i, '\\n\\nKey Features:\\n')\n  .replace(/Features:\\s*/i, '\\n\\nFeatures:\\n')\n  .replace(/Highlights:\\s*/i, '\\n\\nHighlights:\\n')\n  .replace(/Amenities:\\s*/i, '\\n\\nAmenities:\\n');\n\n// Remove marketing/contact fluff at the end\ndescription = description\n  .replace(/Contact now.*$/is, '')\n  .replace(/For more information.*$/is, '')\n  .replace(/Kindly call.*$/is, '')\n  .replace(/Call us.*$/is, '')\n  .replace(/Please call.*$/is, '')\n  .replace(/For enquir.*$/is, '')\n  .replace(/For inspection.*$/is, '');\n\n// Final cleanup\ndescription = description\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .replace(/[ \\t]+/g, ' ')\n  .trim();\n\nif (description.length > 2000) description = description.substring(0, 2000) + '...';\n\n// ---- AGENT CONTACTS ----\nconst phone = scrape(/href=\"tel:([^\"]+)\"/);\nconst waNum = scrape(/phone=(\\d+)/);\nconst email = scrape(/mailto:([^\"]+)\"/);\n\nreturn [{\n  json: {\n    title: listing.title || '',\n    price_raw: listing.price_raw || '',\n    price_numeric: listing.price_numeric || 0,\n    location: listing.location || '',\n    url: listing.url || '',\n    bedrooms: listing.bedrooms || 0,\n    property_type: listing.property_type || '',\n    agent_phone: phone,\n    agent_whatsapp: waNum ? '+' + waNum : '',\n    agent_email: email || 'Judedivine68@gmail.com',\n    description: description\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        1760
+      ],
+      "id": "94bfc4ba-e0bd-453d-8543-e0c0f0b4101e",
+      "name": "Scrape Agent Contacts",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": {
+          "__rl": true,
+          "value": "appXpYbJyZfucB4tT",
+          "mode": "list",
+          "cachedResultName": "Real Estate Dealflow",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblBdcnelAQov15Xw",
+          "mode": "list",
+          "cachedResultName": "Investment Criteria",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT/tblBdcnelAQov15Xw"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Title": "={{ $json.title }}",
+            "Price_Raw": "={{ $json.price_raw }}",
+            "Price_Numeric": "={{ $json.price_numeric }}",
+            "Location": "={{ $json.location }}",
+            "Bedrooms": "={{ $json.bedrooms }}",
+            "Property Type": "={{ $json.property_type }}",
+            "AI_Score": "={{ $json.ai_score }}",
+            "AI_Recommendation": "={{ $json.ai_recommendation }}",
+            "Agent Phone": "={{ $json.agent_phone }}",
+            "Agent_WhatsApp": "={{ $json.agent_whatsapp }}",
+            "URL": "={{ $json.url }}",
+            "AI_Evaluation": "={{ $json.ai_evaluation }}",
+            "Agent_Email": "={{ $json.agent_email }}",
+            "Description": "={{ $json.description }}"
+          },
+          "matchingColumns": [
+            "Title"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Location",
+              "displayName": "Location",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Bedrooms",
+              "displayName": "Bedrooms",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Property Type",
+              "displayName": "Property Type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "AI_Score",
+              "displayName": "AI_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "AI_Recommendation",
+              "displayName": "AI_Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Price_Numeric",
+              "displayName": "Price_Numeric",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent Phone",
+              "displayName": "Agent Phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent_WhatsApp",
+              "displayName": "Agent_WhatsApp",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "AI_Evaluation",
+              "displayName": "AI_Evaluation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Price_Raw",
+              "displayName": "Price_Raw",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent_Email",
+              "displayName": "Agent_Email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Created_Time",
+              "displayName": "Created_Time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Outreach_Status",
+              "displayName": "Outreach_Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Type",
+              "displayName": "Doc_Type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Authenticity_Score",
+              "displayName": "Doc_Authenticity_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Red_Flags",
+              "displayName": "Red_Flags",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Recommendation",
+              "displayName": "Doc_Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Date_issued",
+              "displayName": "Doc_Date_issued",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Owner",
+              "displayName": "Doc_Owner",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2512,
+        2048
+      ],
+      "id": "76dd56ef-b788-44f4-8fb0-aeaedcc04df4",
+      "name": "Save to Airtable",
+      "retryOnFail": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "G0GXt7Zz0AOBvBKT",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Evaluate property:\nTitle: {{ $json.title }}\nPrice: ₦{{ $json.price_numeric }}\nLocation: {{ $json.location }}\nBedrooms: {{ $json.bedrooms }}\nType: {{ $json.property_type }}\nDescription: {{ $json.description }}\nURL: {{ $json.url }}",
+        "options": {
+          "systemMessage": "You are a senior Nigerian real estate investment analyst with deep knowledge of the Lagos property market.\n\nEvaluate the property below against these STRICT criteria:\n- Budget: ₦50,000,000 to ₦350,000,000\n- Target locations: Lekki Phase 1 & 2, Ikoyi, Victoria Island, Ajah, Ikeja GRA, Banana Island\n- Property types: Detached Duplex, Semi-Detached Duplex, Terrace\n- Minimum 3 bedrooms\n- Red flags: Swamp areas, no road access, overpriced for the neighborhood, under-construction without a completion date\n\nIn your evaluation, address ALL of the following:\n1. Is the price fair for the location and property type?\n2. What is the investment potential (rental yield, resale value)?\n3. Any location-specific risks (flooding, traffic, security)?\n4. Why you scored it the way you did\n\nRespond ONLY as valid JSON:\n{\"score\": <1-10>, \"recommendation\": \"<BUY|WATCH|SKIP>\", \"evaluation\": \"<3-4 detailed sentences covering price fairness, investment potential, and risks>\"}\n",
+          "maxIterations": 3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2960,
+        1648
+      ],
+      "id": "53505ee8-7758-4efd-86bf-b270dfdd1e9e",
+      "name": "AI Property Analyst",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.fields.Agent_Email }}",
+        "subject": "=Inquiry About {{ $json.fields.Title }} – {{ $json.fields.Location }}",
+        "emailType": "text",
+        "message": "=Dear Sir/Madam,\n\nI hope this email finds you well.\n\nI am reaching out regarding the property listed on PropertyPro.ng:\n\nProperty: {{ $json.fields.Title }}\nLocation: {{ $json.fields.Location }}\nListed Price: {{ $json.fields.Price_Raw }}\nReference: {{ $json.fields.URL }}\n\nI represent an investment firm actively acquiring residential properties in Lagos. We have reviewed this listing and would like to proceed with our due diligence process.\n\nTo facilitate this, kindly provide the following documents at your earliest convenience:\n\n  1. Certificate of Occupancy (C of O)\n  2. Governor's Consent\n  3. Registered Survey Plan\n  4. Deed of Assignment (if applicable)\n  5. Proof of Excision (if applicable)\n\nDocuments may be sent as PDF attachments to this email or shared via WhatsApp to the number below.\n\nWe appreciate your prompt response and look forward to a mutually beneficial transaction.\n\nBest regards,\nDivine\nTel: +234 905 388 566",
+        "options": {
+          "appendAttribution": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3024,
+        2048
+      ],
+      "id": "a91bb09b-f1d1-4d01-84d7-c9b957773020",
+      "name": "Send Outreach Email via Gmail",
+      "webhookId": "bb7e9e53-3d53-44f6-8c73-7b0becd88d8f",
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2MOfPjk6oJ42Mhw4",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appXpYbJyZfucB4tT",
+          "mode": "list",
+          "cachedResultName": "Real Estate Dealflow"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblBdcnelAQov15Xw",
+          "mode": "list",
+          "cachedResultName": "Investment Criteria"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Outreach_Status": "Sent",
+            "Agent_Email": "={{ $('Has Agent Email?').item.json.fields.Agent_Email }}",
+            "id": "={{ $('Has Agent Email?').item.json.id }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Location",
+              "displayName": "Location",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Bedrooms",
+              "displayName": "Bedrooms",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Property Type",
+              "displayName": "Property Type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "AI_Score",
+              "displayName": "AI_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "AI_Recommendation",
+              "displayName": "AI_Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Price_Numeric",
+              "displayName": "Price_Numeric",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Agent Phone",
+              "displayName": "Agent Phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Agent_WhatsApp",
+              "displayName": "Agent_WhatsApp",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "AI_Evaluation",
+              "displayName": "AI_Evaluation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Price_Raw",
+              "displayName": "Price_Raw",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Agent_Email",
+              "displayName": "Agent_Email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Created_Time",
+              "displayName": "Created_Time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Outreach_Status",
+              "displayName": "Outreach_Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Doc_Type",
+              "displayName": "Doc_Type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Authenticity_Score",
+              "displayName": "Doc_Authenticity_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Red_Flags",
+              "displayName": "Red_Flags",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Recommendation",
+              "displayName": "Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Date_issued",
+              "displayName": "Doc_Date_issued",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Doc_Owner",
+              "displayName": "Doc_Owner",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        3312,
+        2048
+      ],
+      "id": "89ba3dce-8665-4399-bc4c-9a3d9c8a8f2d",
+      "name": "Mark as Outreach Sent in Airtable",
+      "retryOnFail": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "G0GXt7Zz0AOBvBKT",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pageUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1616,
+        2048
+      ],
+      "id": "2c90734e-90c2-45d0-94f3-4c49f5630765",
+      "name": "Fetch Listing Pages",
+      "alwaysOutputData": false,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2512,
+        1760
+      ],
+      "id": "e6e3d853-cbbe-487d-88b4-41a761e14b1f",
+      "name": "Fetch Property Detail Page",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f42843c4-cc4f-4c7a-905a-542de7650fa1",
+              "leftValue": "={{ $json.fields.Agent_Email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": "",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2736,
+        2048
+      ],
+      "id": "aef2afc8-0cd4-485e-8bb0-c9723a9eaa5f",
+      "name": "Has Agent Email?"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appXpYbJyZfucB4tT",
+          "mode": "list",
+          "cachedResultName": "Real Estate Dealflow",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblUbILN3E7hdIdTv",
+          "mode": "list",
+          "cachedResultName": "Rejected Deals",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT/tblUbILN3E7hdIdTv"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Bedrooms": "={{ $json.bedrooms }}",
+            "Price_Numeric": "={{ $json.price_numeric }} ",
+            "AI_Score": "={{ $json.ai_score }} ",
+            "Title": "={{ $json.title }}",
+            "Location": "={{ $json.location }}",
+            "Property Type": "={{ $json.property_type }}",
+            "Price_Raw": "={{ $json.price_raw }} ",
+            "URL": "={{ $json.url }} ",
+            "AI_Recommendation": "={{ $json.ai_recommendation }}",
+            "AI_Evaluation": "={{ $json.ai_evaluation }}",
+            "Agent_Email": "={{ $json.agent_email }}",
+            "Agent Phone": "={{ $json.agent_phone }}",
+            "Agent_WhatsApp": "={{ $json.agent_whatsapp }}",
+            "Description": "={{ $json.description }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Location",
+              "displayName": "Location",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Bedrooms",
+              "displayName": "Bedrooms",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Property Type",
+              "displayName": "Property Type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Price_Raw",
+              "displayName": "Price_Raw",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Price_Numeric",
+              "displayName": "Price_Numeric",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "AI_Score",
+              "displayName": "AI_Score",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "AI_Recommendation",
+              "displayName": "AI_Recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "AI_Evaluation",
+              "displayName": "AI_Evaluation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent_Email",
+              "displayName": "Agent_Email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent Phone",
+              "displayName": "Agent Phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Agent_WhatsApp",
+              "displayName": "Agent_WhatsApp",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2512,
+        2240
+      ],
+      "id": "73e657c3-6054-4bcd-b5c5-97fb91cb5924",
+      "name": "Save Rejected Properties",
+      "retryOnFail": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "G0GXt7Zz0AOBvBKT",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "llama-3.1-8b-instant",
+          "mode": "list",
+          "cachedResultName": "llama-3.1-8b-instant"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        3040,
+        1872
+      ],
+      "id": "97d60dc4-0df5-4a43-89fd-d92164128be3",
+      "name": "LLM - Property Analyst",
+      "retryOnFail": true,
+      "credentials": {
+        "openAiApi": {
+          "id": "QcwX1zNtC404olyZ",
+          "name": "Groq/OpenAi account 1"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        2048
+      ],
+      "id": "b4b7663a-7725-4776-8e11-6f4d79828fe5",
+      "name": "When clicking ‘Execute workflow’"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Generate Pages": {
+      "main": [
+        [
+          {
+            "node": "Fetch Listing Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Normalize Listings": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Listings": {
+      "main": [
+        [
+          {
+            "node": "Filter BUY",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Fetch Property Detail Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge AI Result": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Agent Contacts": {
+      "main": [
+        [
+          {
+            "node": "AI Property Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter BUY": {
+      "main": [
+        [
+          {
+            "node": "Save to Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Rejected Properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Property Analyst": {
+      "main": [
+        [
+          {
+            "node": "Merge AI Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Airtable": {
+      "main": [
+        [
+          {
+            "node": "Has Agent Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Outreach Email via Gmail": {
+      "main": [
+        [
+          {
+            "node": "Mark as Outreach Sent in Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Listing Pages": {
+      "main": [
+        [
+          {
+            "node": "Extract & Normalize Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Property Detail Page": {
+      "main": [
+        [
+          {
+            "node": "Scrape Agent Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Agent Email?": {
+      "main": [
+        [
+          {
+            "node": "Send Outreach Email via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM - Property Analyst": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Property Analyst",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Generate Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark as Outreach Sent in Airtable": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timeSavedPerExecution": 10
+  },
+  "versionId": "7974c8ad-9041-435d-92de-30fc197ca4ba",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2c1ffb24a3e87a83c31fa78345cf69ea846fd59e85614b2c56d330945db7d253"
+  },
+  "id": "vOgEuCIVfifAif5F",
+  "tags": []
+}
