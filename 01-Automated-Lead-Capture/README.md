@@ -1,6 +1,6 @@
 # AI Inbound Sales Pipeline
 
-![ai_sales_pipeline_cover_1774238043028](https://github.com/user-attachments/assets/65ade3f4-512f-4503-9928-62a1a03ee763)
+<img width="1440" height="900" alt="Screenshot 2026-03-23 at 4 04 38 AM" src="https://github.com/user-attachments/assets/7dc2ff84-4cc5-43f5-b6f7-a3456dd028c8" />
 
 A system built to solve one of the most expensive problems in B2B sales: Sales Development Representatives (SDRs) wasting 80% of their day on research and data entry instead of actually talking to prospects.
 
