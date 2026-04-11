@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Clients · AW Portal{% endblock %}
+{% block content %}
+<div class="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900">Clients</h1>
+    <p class="text-slate-600">Select a household to generate the quarterly report.</p>
+  </div>
+  <a href="{{ url_for('client_new') }}"
+     class="inline-flex items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-brand-dark">
+    Add client
+  </a>
+</div>
+
+{% if clients %}
+<ul class="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+  {% for c in clients %}
+  <li class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <p class="font-semibold text-slate-900">
+        {{ c.c1_first_name }} {{ c.c1_last_name }}
+        {% if c.is_married and c.c2_first_name %}
+        <span class="font-normal text-slate-500">&</span> {{ c.c2_first_name }} {{ c.c2_last_name }}
+        {% endif %}
+      </p>
+      <p class="text-sm text-slate-500">ID {{ c.id }}{% if c.trust_property_address %} · {{ c.trust_property_address[:48] }}{% if c.trust_property_address|length > 48 %}…{% endif %}{% endif %}</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="{{ url_for('report_form', client_id=c.id) }}"
+         class="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark">
+        Generate quarterly report
+      </a>
+      <a href="{{ url_for('client_edit', client_id=c.id) }}"
+         class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        Edit profile
+      </a>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-600">
+  <p class="mb-4">No clients yet.</p>
+  <a href="{{ url_for('client_new') }}" class="font-semibold text-brand hover:underline">Create the first client</a>
+</div>
+{% endif %}
+{% endblock %}
