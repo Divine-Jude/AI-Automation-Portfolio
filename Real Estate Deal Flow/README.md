@@ -2,7 +2,7 @@
 
 ---
 
-# AI-Powered Real Estate Dealflow
+# Autonomous Real Estate Sourcing & Legal Validation Agent
 
 An autonomous n8n workflow that completely automates real estate deal sourcing, AI-driven investment analysis, broker outreach, and preliminary legal document verification. 
 
