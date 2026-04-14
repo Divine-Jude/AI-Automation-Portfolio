@@ -7,7 +7,7 @@ My work focuses on leveraging tools like **n8n, LangChain, LLMs (Groq, OpenAI, A
 ## 📂 Projects Directory
 *Below is a living index of my major automation projects. Click into any folder for full architectural documentation, workflow JSONs, and implementation guides.*
 
-### [1. Real Estate Dealflow & Due Diligence Automation](https://github.com/Divine-Jude/AI-Automation-Portfolio/tree/main/Real%20Estate%20Deal%20Flow)
+### [1. Autonomous Real Estate Sourcing & Legal Validation Agent](https://github.com/Divine-Jude/AI-Automation-Portfolio/tree/main/Real%20Estate%20Deal%20Flow)
 **Tech Stack:** `n8n`, `Python`, `Airtable API`, `PDF Text Extraction`, `JSON, Web Scraping`, `API Integration`
 - **Description:** I designed a complete end-to-end pipeline to automate real estate deal-flow evaluation. The system crawls unstructured property data, validates it against strict JSON schemas and handles data ingestion via the Airtable API. I also built a specialized AI compliance agent for this pipeline. It securely reads complex PDF legal title documents and automatically flags missing signatures, expired dates or compliance risks so human reviewers do not have to read them manually. To make this work at scale, I wrote custom logic to handle recursive pagination, regex data sanitisation and API rate-limiting.
 
