@@ -13,7 +13,7 @@ This system acts as an autonomous acqusitions team, scraping listings, evaluatin
 The workflow is built entirely in **n8n** and divided into four core phases:
 
 ### Phase 1: Data Ingestion (Scraping & Normalization)
-- Recursively fetches paginated property listings from target platforms (e.g., PropertyPro).
+- Recursively fetches paginated property listings from target platforms
 - Uses custom JavaScript to parse raw HTML blocks, extracting robust metadata (Price, Location, Bedrooms, Property Type, URL).
 - Cleans and normalizes semi-structured descriptions, filtering out marketing fluff.
 
