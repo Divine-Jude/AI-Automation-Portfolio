@@ -1,4 +1,4 @@
-# AI Inbound Sales Pipeline
+# AI Inbound Sales & CRM Pipeline
 
 <img width="1440" height="900" alt="Screenshot 2026-03-23 at 4 04 38 AM" src="https://github.com/user-attachments/assets/7dc2ff84-4cc5-43f5-b6f7-a3456dd028c8" />
 
