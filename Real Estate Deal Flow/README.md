@@ -4,7 +4,7 @@
 
 # Autonomous Real Estate Sourcing & Legal Validation Agent
 
-An autonomous n8n workflow that completely automates real estate deal sourcing, AI-driven investment analysis, broker outreach, and preliminary legal document verification. 
+This is an autonomous n8n workflow that completely automates real estate deal sourcing, AI-driven investment analysis, broker outreach, and preliminary legal document verification. 
 
 This system acts as an autonomous acqusitions team, scraping listings, evaluating them against strict investment criteria, negotiating/requesting documents, and analyzing title documents (C of O, Governor's Consent) for authenticity and red flags using LLMs.
 
