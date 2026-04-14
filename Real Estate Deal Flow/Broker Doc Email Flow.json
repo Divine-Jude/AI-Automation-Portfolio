@@ -1,0 +1,684 @@
+{
+  "name": "Broker Doc Email Flow",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cloud.llamaindex.ai/api/parsing/upload",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{ \"Authorization\": \"Bearer llx-NGLSbGZ252s9jirgrHF0KOvtACKPBb01c2cug2GoJW6qMA3Q\" }",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "={{ $json.attachmentKey }}"
+            },
+            {
+              "name": "file_name",
+              "value": "={{ $binary[$json.attachmentKey].fileName || 'document.pdf' }}"
+            },
+            {
+              "name": "configuration",
+              "value": "{\"parse_options\": {\"parse_mode\": \"preset\"}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9890f46f-c2b1-432c-9d30-97a7b6a6f203",
+      "name": "LlamaParse (extraction)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        5952,
+        2672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const keys = Object.keys($binary || {});\n\nreturn keys\n  .filter(key => {\n    const file = $binary[key];\n    return file.mimeType === 'application/pdf';\n  })\n  .map(key => ({\n    json: {\n      ...$json,\n      attachmentKey: key\n    },\n    binary: {\n      [key]: $binary[key]\n    }\n  }));"
+      },
+      "id": "af151b35-f673-4589-9308-dded9c5389f4",
+      "name": "Loop Over All Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5728,
+        2672
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "llama-3.3-70b-versatile",
+          "mode": "list",
+          "cachedResultName": "llama-3.3-70b-versatile"
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 800
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        6928,
+        2768
+      ],
+      "name": "LLM - Doc Analyst",
+      "id": "a0b51bd5-6a7b-4125-b349-29fd8a0b631c",
+      "credentials": {
+        "openAiApi": {
+          "id": "xKhgnNSMCe80uOvX",
+          "name": "Groq/OpenAi account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const analyses = $('Parse Document Verification Result').all().map(a => a.json);\nconst airtableRecords = $input.all().map(a => a.json);\n\nconst results = [];\nconst usedRecordIds = new Set();\n\nfor (const analysis of analyses) {\n  const potentialRecords = airtableRecords.filter(r =>\n    (r.Agent_Email || '').toLowerCase() === (analysis.email_from || '').toLowerCase()\n  );\n\n  let bestRecord = null;\n\n  for (const r of potentialRecords) {\n    if (usedRecordIds.has(r.id)) continue;\n    const titleLower = (r.Title || '').toLowerCase();\n    const subjectLower = (analysis.email_subject || '').toLowerCase();\n    const propTitleLower = (analysis.property_title || '').toLowerCase();\n    if (titleLower && (subjectLower.includes(titleLower) || titleLower.includes(propTitleLower))) {\n      bestRecord = r;\n      break;\n    }\n  }\n\n  if (!bestRecord) {\n    bestRecord = potentialRecords.find(r => !usedRecordIds.has(r.id));\n  }\n\n  if (bestRecord) {\n    usedRecordIds.add(bestRecord.id);\n    results.push({ json: { id: bestRecord.id, ...analysis } });\n  }\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8096,
+        2544
+      ],
+      "name": "Smart Merge Email with Exact Airtable Row",
+      "id": "85114582-0ae7-4ae9-b3b3-984df29afbfa"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appXpYbJyZfucB4tT",
+          "mode": "list",
+          "cachedResultName": "Real Estate Dealflow"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblBdcnelAQov15Xw",
+          "mode": "list",
+          "cachedResultName": "Investment Deals",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT/tblBdcnelAQov15Xw"
+        },
+        "filterByFormula": "={{ \"LOWER({Agent_Email})=LOWER('\" + String($json.email_from || '').replace(/'/g, \"''\") + \"')\" }}",
+        "options": {
+          "fields": [
+            "Title",
+            "Location",
+            "AI_Recommendation",
+            "AI_Score",
+            "Agent_Email"
+          ],
+          "view": {
+            "__rl": true,
+            "value": "viwyxhqYinnXl7C1U",
+            "mode": "list",
+            "cachedResultName": "Sheet 1",
+            "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT/tblBdcnelAQov15Xw/viwyxhqYinnXl7C1U"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        7872,
+        2544
+      ],
+      "name": "Find Matching Deal in Airtable",
+      "id": "b3bcec58-593e-4480-b7c4-8833484a32ca",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "G0GXt7Zz0AOBvBKT",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze this title document:\n\n{{ $json.markdown || $json.data?.markdown || '' }}",
+        "options": {
+          "systemMessage": "You are a Nigerian real estate legal document analyst with expertise in Lagos State property law.\n\nAnalyze the following document text extracted from a title document and determine:\n\n1. **Document Type**: C of O, Governor's Consent, Survey Plan, Excision, Deed of Assignment, etc.\n2. **Authenticity Assessment**: Based on formatting, language, and content, rate authenticity 1-10\n3. **Key Details**: Property location, registered owner, date of issue, plot size, survey plan number\n4. **Red Flags**: Expired documents, inconsistent dates, missing signatures, forged indicators, mismatch with listing details\n5. **Location Cross-check**: Does the document location match the property listing location?\n\nRespond ONLY as valid JSON:\n{\"doc_type\": \"...\", \"authenticity_score\": <1-10>, \"key_details\": {\"owner\": \"...\", \"location\": \"...\", \"date_issued\": \"...\", \"plot_size\": \"...\"}, \"red_flags\": [\"...\"], \"recommendation\": \"<VERIFIED|CAUTION|REJECT>\", \"summary\": \"<2-3 sentence analysis>\"}",
+          "maxIterations": 1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        6848,
+        2544
+      ],
+      "name": "AI Document Analyst",
+      "id": "d2e28bcc-e5bf-48c9-9558-aa4a18bbadd6"
+    },
+    {
+      "parameters": {
+        "url": "={{ `https://api.cloud.llamaindex.ai/api/parsing/job/${$json.id}` }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{ \"Authorization\": \"Bearer llx-NGLSbGZ252s9jirgrHF0KOvtACKPBb01c2cug2GoJW6qMA3Q\" }",
+        "options": {}
+      },
+      "id": "8b884f4e-bb51-4ff3-b31c-8341d17807d7",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        6176,
+        2672
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "SUCCESS",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "7504c59f-e661-46fe-87a7-175b9dcdddfe"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "looseTypeValidation": true
+        }
+      },
+      "id": "90548da1-2928-40d7-9951-9d0003167ece",
+      "name": "If SUCCESS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        6400,
+        2592
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 5
+      },
+      "id": "d67010ec-41ff-4e21-ac45-2e2d164f26be",
+      "name": "Wait 5s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        6624,
+        2768
+      ],
+      "webhookId": "a45ad0c5-1229-4ac3-b1c8-7fa3e3aa75f1"
+    },
+    {
+      "parameters": {
+        "url": "={{ `https://api.cloud.llamaindex.ai/api/parsing/job/${$json.id}/result/markdown` }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{ \"Authorization\": \"Bearer llx-NGLSbGZ252s9jirgrHF0KOvtACKPBb01c2cug2GoJW6qMA3Q\" }",
+        "options": {}
+      },
+      "id": "024e7b00-c08b-42b2-bd78-ef6df9e9d342",
+      "name": "Get Markdown",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        6624,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "has:attachment",
+          "readStatus": "both",
+          "sender": "Judedivine68@gmail.com"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "id": "f3106534-ad78-4283-b0d3-bb4df8b58792",
+      "name": "Get Brokers Replies",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        5280,
+        2672
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "LgzVbtjJfLaQWyQu",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "=Object.values($binary || {}).some(f => f.mimeType === 'application/pdf')",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "id": "1d2169ce-7328-45eb-9063-e085c404e0ef"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "looseTypeValidation": true
+        }
+      },
+      "id": "94c46e5a-c4f5-4c1f-a26c-73f831b4ff36",
+      "name": "Has PDF Attachments?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5504,
+        2672
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appXpYbJyZfucB4tT",
+          "mode": "list",
+          "cachedResultName": "Real Estate Dealflow",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblBdcnelAQov15Xw",
+          "mode": "list",
+          "cachedResultName": "Investment Criteria",
+          "cachedResultUrl": "https://airtable.com/appXpYbJyZfucB4tT/tblBdcnelAQov15Xw"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "Doc_Type": "={{ $json.doc_type }}",
+            "Red_Flags": "={{ $json.red_flags }}",
+            "Doc_Authenticity_Score": "={{ $json.authenticity_score }}",
+            "Summary": "={{ $json.summary }}",
+            "Doc_Owner": "={{ $json.owner }}",
+            "Doc_Date_issued": "={{ $json.date_issued }}",
+            "Doc_Recommendation": "={{ $json.doc_recommendation }}",
+            "Documents": "={{$('Attach Drive Link').first().json.drive_link}}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        8320,
+        2544
+      ],
+      "name": "Final Analysis",
+      "id": "58af96d6-978e-48bc-81f3-b6006789ed13",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "G0GXt7Zz0AOBvBKT",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const aiOutput = $input.item.json;\nlet result = {};\ntry {\n  const text = aiOutput.output || aiOutput.text || '{}';\n  const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);\n  result = jsonMatch ? JSON.parse(jsonMatch[0]) : {};\n} catch (e) {\n  result = { doc_type: 'Unknown', authenticity_score: 0, recommendation: 'REJECT', summary: 'Failed to parse' };\n}\n\nlet emailFrom = 'unknown@example.com';\nlet emailSubject = '';\nlet propertyTitle = '';\nlet attachmentKey = '';\nlet outputBinary = {};\n\ntry {\n  const index = $itemIndex;\n  const allLoopItems = $('Loop Over All Attachments').all();\n  const targetItem = allLoopItems[index] || allLoopItems[0];\n\n  if (targetItem && targetItem.json) {\n    const fromField = targetItem.json.from;\n    if (fromField && typeof fromField === 'object' && fromField.value && fromField.value[0]) {\n      emailFrom = (fromField.value[0].address || '').toLowerCase();\n    } else {\n      const rawFrom = String(fromField || '');\n      const emailMatch = rawFrom.match(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/);\n      emailFrom = emailMatch ? emailMatch[0].toLowerCase() : rawFrom.toLowerCase();\n    }\n    emailSubject = String(targetItem.json.subject || '');\n    propertyTitle = emailSubject.replace(/^Re:\\s*/i, '').trim();\n    attachmentKey = targetItem.json.attachmentKey || Object.keys(targetItem.binary || {})[0] || '';\n\n    if (attachmentKey && targetItem.binary?.[attachmentKey]) {\n      outputBinary = {\n        [attachmentKey]: targetItem.binary[attachmentKey]\n      };\n    } else {\n      outputBinary = targetItem.binary || {};\n    }\n  }\n} catch (e) {}\n\nreturn {\n  json: {\n    email_from: emailFrom,\n    email_subject: emailSubject,\n    property_title: propertyTitle,\n    attachmentKey,\n    doc_type: result.doc_type || 'Unknown',\n    authenticity_score: result.authenticity_score || 0,\n    doc_recommendation: result.recommendation || 'REJECT',\n    summary: result.summary || 'No analysis',\n    red_flags: (result.red_flags || []).join(', '),\n    owner: (result.key_details || {}).owner || '',\n    doc_location: (result.key_details || {}).location || '',\n    date_issued: (result.key_details || {}).date_issued || ''\n  },\n  binary: outputBinary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7200,
+        2544
+      ],
+      "name": "Parse Document Verification Result",
+      "id": "b2c6a005-cacd-4e3f-b9e4-5a9b1a775dc9"
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "={{ Object.keys($binary || {})[0] || $json.attachmentKey || 'attachment_0' }}",
+        "name": "={{ $json.property_title || 'Unknown Property' }} - {{ $json.owner || 'Unknown Owner' }}.pdf",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1bY8wrzn8rg_X48SylSkGrWZ-z1N-LUmj",
+          "mode": "list",
+          "cachedResultName": "Broker Docs",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1bY8wrzn8rg_X48SylSkGrWZ-z1N-LUmj"
+        },
+        "options": {}
+      },
+      "id": "0576cd4f-f4ca-45c1-979f-7ac9bff4d008",
+      "name": "Upload to Google Drive (storage)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        7424,
+        2544
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "32BTMA321OM6L7t1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiData = $('Parse Document Verification Result').item.json;\nreturn [{\n  json: {\n    ...aiData,\n    drive_link: $json.webViewLink\n  },\n  binary: $binary\n}];"
+      },
+      "id": "1f55b946-e74f-4ccb-8db4-aa364bfd0dea",
+      "name": "Attach Drive Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7648,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0AEJP56JDV",
+          "mode": "list",
+          "cachedResultName": "all-personal-automation"
+        },
+        "text": "=🚨 New Broker Document Received    \n\n📩 Broker: {{ $json.fields.Doc_Owner }}\n🏠 Property: {{ $json.fields.Title }}\n📄 Document Type: {{ $json.fields['Property Type'] }} \n📊 Authenticity Score: {{ $json.fields.Doc_Authenticity_Score }}/10  \n⚠️ Recommendation: {{ $json.fields.Doc_Recommendation }}\n\n🧠 Summary: {{ $json.fields.Summary }}\n🔍 Red Flags: {{ $json.fields.Red_Flags }}\n🔗 Drive: {{ $json.fields.Documents }}\n\nYou can review the documents your self and send a reply to the mail {{ $json.fields.Agent_Email }}\n",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        8544,
+        2544
+      ],
+      "id": "e38cc249-c10e-48e9-88c1-ce1da2caac31",
+      "name": "Send File + Message",
+      "webhookId": "f9506236-940c-4a58-864d-dbb16892ff80",
+      "credentials": {
+        "slackApi": {
+          "id": "ILZE2VxH1aLB7CkY",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "LlamaParse (extraction)": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over All Attachments": {
+      "main": [
+        [
+          {
+            "node": "LlamaParse (extraction)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM - Doc Analyst": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Document Analyst",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Smart Merge Email with Exact Airtable Row": {
+      "main": [
+        [
+          {
+            "node": "Final Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Matching Deal in Airtable": {
+      "main": [
+        [
+          {
+            "node": "Smart Merge Email with Exact Airtable Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Document Analyst": {
+      "main": [
+        [
+          {
+            "node": "Parse Document Verification Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [
+          {
+            "node": "If SUCCESS?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If SUCCESS?": {
+      "main": [
+        [
+          {
+            "node": "Get Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 5s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5s": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Markdown": {
+      "main": [
+        [
+          {
+            "node": "AI Document Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Brokers Replies": {
+      "main": [
+        [
+          {
+            "node": "Has PDF Attachments?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has PDF Attachments?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over All Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Document Verification Result": {
+      "main": [
+        [
+          {
+            "node": "Upload to Google Drive (storage)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Google Drive (storage)": {
+      "main": [
+        [
+          {
+            "node": "Attach Drive Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Drive Link": {
+      "main": [
+        [
+          {
+            "node": "Find Matching Deal in Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Analysis": {
+      "main": [
+        [
+          {
+            "node": "Send File + Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "timezone": "Africa/Lagos",
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "timeSavedPerExecution": 5
+  },
+  "versionId": "7ff5c1c1-887c-4792-aa92-a5d0e56ed2e0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2c1ffb24a3e87a83c31fa78345cf69ea846fd59e85614b2c56d330945db7d253"
+  },
+  "id": "ZAu06Er5KSW8eIgr",
+  "tags": [
+    {
+      "updatedAt": "2026-03-04T14:31:27.983Z",
+      "createdAt": "2026-03-04T14:31:27.983Z",
+      "id": "ZTdcjwhyHjqEB700",
+      "name": "DOCUMENT VERIFICATION"
+    },
+    {
+      "updatedAt": "2026-03-04T14:31:35.551Z",
+      "createdAt": "2026-03-04T14:31:35.551Z",
+      "id": "lSpmcJMBcoXMZpvP",
+      "name": "Phase 4"
+    }
+  ]
+}
