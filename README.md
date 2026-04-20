@@ -3,17 +3,41 @@
 Welcome to my portfolio! This repository showcases production-grade autonomous systems, AI workflows, and business automation software I've developed.
 My work focuses on leveraging tools like **n8n, LangChain, LLMs (Groq, OpenAI, Anthropic), and various API integrations** to replace manual processes with resilient, scalable, and intelligent workflows.
 
+### What I build
+- Workflow automation: n8n systems for inbound operations, scheduling, CRM updates, and data routing
+- AI-assisted logic: LLM-driven classification, drafting, and decision support with guardrails
+- Data pipelines: ingestion from unstructured sources, schema validation, dedupe, and audit logging
+- API integrations: Gmail, Google Calendar, Apollo, HubSpot, Airtable, and custom REST services
+
 ---
 ## 📂 Projects Directory
 *Below is a living index of my major automation projects. Click into any folder for full architectural documentation, workflow JSONs, and implementation guides.*
 
-### [1. Autonomous Real Estate Sourcing & Legal Validation Agent](https://github.com/Divine-Jude/AI-Automation-Portfolio/tree/main/Real%20Estate%20Deal%20Flow)
-**Tech Stack:** `n8n`, `Python`, `Airtable API`, `PDF Text Extraction`, `JSON, Web Scraping`, `API Integration`
-- **Description:** I designed a complete end-to-end pipeline to automate real estate deal-flow evaluation. The system crawls unstructured property data, validates it against strict JSON schemas and handles data ingestion via the Airtable API. I also built a specialized AI compliance agent for this pipeline. It securely reads complex PDF legal title documents and automatically flags missing signatures, expired dates or compliance risks so human reviewers do not have to read them manually. To make this work at scale, I wrote custom logic to handle recursive pagination, regex data sanitisation and API rate-limiting.
+### 1. AI Email Triage and Calendar Booking Agent
+Stack: n8n, PostgreSQL, Groq, Gmail API, Google Calendar API, Slack optional
 
-### [2. AI Inbound Sales & CRM Pipeline](https://github.com/Divine-Jude/AI-Automation-Engineer-Portfolio/tree/main/01-Automated-Lead-Capture)
+I built one workflow that triages inbound Gmail into noise, operational, and meeting paths.
+Meeting requests are split into clear versus ambiguous before any calendar logic runs. Ambiguous requests get a clarify reply. Clear requests use real calendar availability plus booking caps from Postgres.
+
+**Key outcomes**
+- Prevents duplicate processing with DB-backed dedupe
+- Uses confidence thresholds to avoid low-quality sends
+- Keeps outbound mail plain text and auditable
+- Supports exact-match auto-booking only when conditions are safe
+
+
+### [2. Autonomous Real Estate Sourcing & Legal Validation Agent](https://github.com/Divine-Jude/AI-Automation-Portfolio/tree/main/Real%20Estate%20Deal%20Flow)
+**Tech Stack:** `n8n`, `Python`, `Airtable API`, `PDF Text Extraction`, `JSON, Web Scraping`, `API Integration`
+- **Description:** I built an inbound sales automation flow that enriches and scores leads before CRM progression.
+The workflow pulls company context, updates HubSpot records, and applies intent checks so low-quality leads do not inflate pipeline stages.
+
+**Impact**
+* Recovered about 25 minutes of manual SDR work per lead
+
+### [3. AI Inbound Sales & CRM Pipeline](https://github.com/Divine-Jude/AI-Automation-Engineer-Portfolio/tree/main/01-Automated-Lead-Capture)
 **Tech Stack:** `n8n`, `HubSpot CRM`, `Apollo API`, `Large Language Models (LLMs)`, `Prompt Engineering`, `Vector Databases`.
-- **Description:** I built an autonomous inbound sales pipeline that automatically qualifies leads before sales reps engage. The workflow triggers upon a new lead, uses an AI research agent and vector database to pull real-time corporate news via the Apollo API, and scores the lead. It then updates HubSpot CRM directly. To prevent pipeline inflation, I built an intent analysis safeguard that requires human verification before moving a lead to the "Deal" stage. This automation recovered roughly 25 minutes of manual work per lead for the sales development team.
+- **Description:** I built an end-to-end sourcing flow from unstructured listing inputs to structured investment records.
+The system validates data against strict schemas, handles pagination and rate limits, and runs document checks on legal title PDFs to flag risks for human review.
 
 ---
 
@@ -23,7 +47,9 @@ My work focuses on leveraging tools like **n8n, LangChain, LLMs (Groq, OpenAI, A
 - **Data Engineering:** Web scraping, DOM parsing, Regex cleanups, and syncing scalable databases (CRMs, Databases).
 
 ## 📫 Contact
-If you'd like to discuss building out AI automations for your business, feel free to reach out.
 - [**LinkedIn:**](https://www.linkedin.com/in/divinejude/)
 - **Email:** (mailto:Judedivine9@gmail.com)
 - [**X:**](https://x.com/DivAutomation)
+
+If you want help deploying automation systems for sales ops, inbox operations, or data-heavy workflows, send me a message.
+
