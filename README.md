@@ -13,7 +13,7 @@ My work focuses on leveraging tools like **n8n, LangChain, LLMs (Groq, OpenAI, A
 ## 📂 Projects Directory
 *Below is a living index of my major automation projects. Click into any folder for full architectural documentation, workflow JSONs, and implementation guides.*
 
-### 1. AI Email Triage and Calendar Booking Agent
+### [1. AI Email Triage and Calendar Booking Agent](https://github.com/Divine-Jude/AI-Automation-Engineer-Portfolio/tree/main/AI%20Email%20Triage%20and%20Calendar%20Booking%20Agent%20Stack)
 Stack: n8n, PostgreSQL, Groq, Gmail API, Google Calendar API, Slack optional
 
 I built one workflow that triages inbound Gmail into noise, operational, and meeting paths.
