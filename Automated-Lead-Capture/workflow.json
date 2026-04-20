@@ -1,0 +1,601 @@
+{
+  "name": "Autonomous SDR (RAG + CRM)",
+  "nodes": [
+    {
+      "parameters": {
+        "memoryKey": {
+          "__rl": true,
+          "mode": "list",
+          "value": "vector_store_key"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        50752,
+        17680
+      ],
+      "id": "bcac2683-eaeb-459b-a0d0-330c8424a4b5",
+      "name": "Vector DB: In-Memory Portfolio Store"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an elite Sales Development Representative Researcher. \n\nA new qualified lead has reached out. Their name is {{ $json.firstName }} {{ $json.lastName }} and they are the {{ $json.jobTitle }} at {{ $json.companyName }}.\n\nTheir specific inquiry/message was: \"{{ $json.inquiry }}\"\n\n1. Use your Live Web Researcher Tool to quickly search for recent news updates about their company.\n2. Use your Case Studies Database to find a relevant project.\n\nDo NOT write an email draft. Instead, extract exactly 3 concise, highly relevant research bullet points about their company that a human SDR can use to build a custom pitch. \n- Bullet 1: A brief note on their specific problem.\n- Bullet 2: A recent piece of news you saw about their company.\n- Bullet 3: A reference to the relevant case study.",
+        "options": {
+          "systemMessage": "CRITICAL INSTRUCTION: You must return ONLY the 3 bullet points. Start immediately with '1.' Do not include any polite greetings, sign-offs, or other commentary. Make the bullet points punchy and actionable for the SDR."
+        }
+      },
+      "id": "595138a8-8b51-47a8-a7c9-a6686ebf4ae9",
+      "name": "Autonomous SDR",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        50912,
+        17216
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Data Enrichment\n(Apollo API )",
+        "height": 856,
+        "width": 372,
+        "color": 7
+      },
+      "id": "06e3ea9e-14bc-4f49-aec3-85500e6a434f",
+      "name": "Note: Enrichment",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        50160,
+        17040
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## RAG Agent\nLangChain ReAct agent searches web + vector DB and\nOutputs a 3-point research dossier ",
+        "height": 988,
+        "width": 644,
+        "color": 7
+      },
+      "id": "2122e429-14bd-4139-b157-78094b83e154",
+      "name": "Note: AI Agent",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        50736,
+        17024
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## CRM Sync ",
+        "height": 476,
+        "width": 676,
+        "color": 7
+      },
+      "id": "05334df9-dc7d-4ecc-923f-64a32405a493",
+      "name": "Note: CRM Sync",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        51456,
+        17152
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Human In Loop Review\nPings #sales-alerts with firmographics + AI research brief.",
+        "height": 392,
+        "width": 324,
+        "color": 7
+      },
+      "id": "943a0788-f0a2-45cb-8b33-65b476bf512d",
+      "name": "Note: Slack Alert",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        52192,
+        17152
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Webhooks put the payload inside a \"body\" wrapper. Let's extract it!\nconst payload = $input.item.json.body || $input.item.json;\nlet score = 0;\n\n// Clean and normalize the data\npayload.firstName = payload.firstName ? payload.firstName.trim() : 'Unknown';\npayload.lastName = payload.lastName ? payload.lastName.trim() : 'Unknown';\npayload.email = payload.email ? payload.email.trim().toLowerCase() : '';\npayload.phone = payload.phone ? payload.phone.trim() : '';\npayload.website = payload.website ? payload.website.trim() : '';\npayload.companySize = payload.companySize ? payload.companySize.trim() : '';\npayload.leadSource = payload.leadSource ? payload.leadSource.trim() : '';\n\n// HubSpot Industry Enum Mapper - converts any plain text to valid HubSpot codes\nconst INDUSTRY_MAP = {\n  'accounting': 'ACCOUNTING',\n  'advertising': 'MARKETING_AND_ADVERTISING',\n  'aerospace': 'AVIATION_AEROSPACE',\n  'ai': 'COMPUTER_SOFTWARE',\n  'artificial intelligence': 'COMPUTER_SOFTWARE',\n  'automotive': 'AUTOMOTIVE',\n  'banking': 'BANKING',\n  'biotechnology': 'BIOTECHNOLOGY',\n  'chemicals': 'CHEMICALS',\n  'construction': 'CONSTRUCTION',\n  'consulting': 'MANAGEMENT_CONSULTING',\n  'consumer electronics': 'CONSUMER_ELECTRONICS',\n  'consumer goods': 'CONSUMER_GOODS',\n  'cybersecurity': 'COMPUTER_NETWORK_SECURITY',\n  'defense': 'DEFENSE_SPACE',\n  'design': 'DESIGN',\n  'e-commerce': 'RETAIL',\n  'ecommerce': 'RETAIL',\n  'education': 'EDUCATION_MANAGEMENT',\n  'electrical': 'ELECTRICAL_ELECTRONIC_MANUFACTURING',\n  'electronics': 'CONSUMER_ELECTRONICS',\n  'energy': 'OIL_ENERGY',\n  'entertainment': 'ENTERTAINMENT',\n  'environmental': 'ENVIRONMENTAL_SERVICES',\n  'finance': 'FINANCIAL_SERVICES',\n  'financial services': 'FINANCIAL_SERVICES',\n  'fintech': 'FINANCIAL_SERVICES',\n  'food': 'FOOD_BEVERAGES',\n  'government': 'GOVERNMENT_ADMINISTRATION',\n  'hardware': 'COMPUTER_HARDWARE',\n  'health': 'HOSPITAL_HEALTH_CARE',\n  'healthcare': 'HOSPITAL_HEALTH_CARE',\n  'hospitality': 'HOSPITALITY',\n  'hr': 'HUMAN_RESOURCES',\n  'human resources': 'HUMAN_RESOURCES',\n  'information technology': 'INFORMATION_TECHNOLOGY_AND_SERVICES',\n  'insurance': 'INSURANCE',\n  'internet': 'INTERNET',\n  'it': 'INFORMATION_TECHNOLOGY_AND_SERVICES',\n  'legal': 'LEGAL_SERVICES',\n  'logistics': 'LOGISTICS_AND_SUPPLY_CHAIN',\n  'manufacturing': 'MECHANICAL_OR_INDUSTRIAL_ENGINEERING',\n  'marketing': 'MARKETING_AND_ADVERTISING',\n  'media': 'MEDIA_PRODUCTION',\n  'medical': 'MEDICAL_PRACTICE',\n  'military': 'MILITARY',\n  'mining': 'MINING_METALS',\n  'networking': 'COMPUTER_NETWORKING',\n  'non-profit': 'NON_PROFIT_ORGANIZATION_MANAGEMENT',\n  'nonprofit': 'NON_PROFIT_ORGANIZATION_MANAGEMENT',\n  'oil': 'OIL_ENERGY',\n  'pharmaceuticals': 'PHARMACEUTICALS',\n  'publishing': 'PUBLISHING',\n  'real estate': 'REAL_ESTATE',\n  'recruiting': 'STAFFING_AND_RECRUITING',\n  'renewables': 'RENEWABLES_ENVIRONMENT',\n  'research': 'RESEARCH',\n  'retail': 'RETAIL',\n  'saas': 'COMPUTER_SOFTWARE',\n  'security': 'SECURITY_AND_INVESTIGATIONS',\n  'semiconductors': 'SEMICONDUCTORS',\n  'software': 'COMPUTER_SOFTWARE',\n  'sports': 'SPORTS',\n  'staffing': 'STAFFING_AND_RECRUITING',\n  'telecommunications': 'TELECOMMUNICATIONS',\n  'telecom': 'TELECOMMUNICATIONS',\n  'transportation': 'TRANSPORTATION_TRUCKING_RAILROAD',\n  'travel': 'LEISURE_TRAVEL_TOURISM',\n  'utilities': 'UTILITIES',\n  'venture capital': 'VENTURE_CAPITAL_PRIVATE_EQUITY',\n  'wholesale': 'WHOLESALE',\n  'wireless': 'WIRELESS'\n};\n\nconst rawIndustry = payload.industry ? payload.industry.trim().toLowerCase() : '';\npayload.industry = INDUSTRY_MAP[rawIndustry] || 'INFORMATION_TECHNOLOGY_AND_SERVICES';\n\nconst title = payload.jobTitle ? payload.jobTitle.toLowerCase() : '';\nif (title.includes('ceo') || title.includes('founder') || title.includes('director')) {\n  score += 50;\n} else if (title.includes('manager')) {\n  score += 30;\n}\n\nif (payload.companySize === '1000+' || payload.companySize === '201-1000') {\n  score += 20;\n}\n\n// Return the cleaned data so the rest of the workflow can read it\nreturn { ...payload, leadScore: score, isQualified: score >= 30, isFacebookAd: payload.leadSource && payload.leadSource.includes('Facebook') ? 'true' : 'false' };\n"
+      },
+      "id": "a535674a-1d52-43a5-9dd4-40fc2ef13b76",
+      "name": "Normalize & Score Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        49968,
+        17296
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "6ff52f82-a38c-47d0-9073-14ea9bbff77c",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        49744,
+        17296
+      ],
+      "id": "3774f823-ee00-420c-9c4f-91dbf166ce27",
+      "name": "Inbound Lead Capture",
+      "webhookId": "6ff52f82-a38c-47d0-9073-14ea9bbff77c"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isQualified }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "3260d624-50ca-4e78-8afb-158da2185127",
+      "name": "Qualification Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        50576,
+        17296
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "llama-3.1-8b-instant",
+          "mode": "list",
+          "cachedResultName": "llama-3.1-8b-instant"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        50752,
+        17472
+      ],
+      "id": "1da567b8-e732-48f3-bfdd-c6d25b6013e5",
+      "name": "The Agent Brain",
+      "credentials": {
+        "openAiApi": {
+          "id": "xKhgnNSMCe80uOvX",
+          "name": "Groq/OpenAi account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "case_studies_database",
+        "description": "Call this tool to search for past case studies, company knowledge, or successful projects based on the user's inquiry topic. IMPORTANT: Provide a specific search query.",
+        "topK": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Limit', ``, 'number') }}"
+      },
+      "id": "e8cb357e-4629-4242-964f-2f7378d7d0ec",
+      "name": "Case Study Internal Retrieval",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        50928,
+        17472
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "google_domain": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Google_Domain', ``, 'string') }}"
+        }
+      },
+      "id": "17121bab-3bb6-40ef-80a8-f2e9b833d934",
+      "name": " Live Web Researcher",
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [
+        51248,
+        17472
+      ],
+      "credentials": {
+        "serpApi": {
+          "id": "3u0kA4XLh4k5kkpe",
+          "name": "SerpAPI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "llama-3.1-8b-instant",
+          "mode": "list",
+          "cachedResultName": "llama-3.1-8b-instant"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        51136,
+        17664
+      ],
+      "id": "7f4fce24-d161-4dd0-aa3d-dcf8ef31c590",
+      "name": "Result Summarizer",
+      "credentials": {
+        "openAiApi": {
+          "id": "xKhgnNSMCe80uOvX",
+          "name": "Groq/OpenAi account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "company",
+        "name": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.companyName }}",
+        "additionalFields": {
+          "aboutUs": "={{ 'An enterprise prospect operating in the ' + $('Normalize & Score Lead').item.json.industry + ' industry. Funding Stage: ' + $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.recentFundingRound + '. Captured via AI Inbound SDR Pipeline.' }}",
+          "annualRevenue": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.estimatedRevenue }}",
+          "city": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.companyCity }}",
+          "countryRegion": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.companyCountry }}",
+          "description": "={{ 'Tech Stack: ' + $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.techStack.join(', ') + ' | Intent Score: ' + $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.intentScore }}",
+          "industry": "={{ $('Normalize & Score Lead').item.json.industry }}",
+          "leadStatus": "NEW",
+          "numberOfEmployees": "={{ $('Normalize & Score Lead').item.json.companySize === '1000+' ? 1500 : $('Normalize & Score Lead').item.json.companySize === '201-1000' ? 500 : 50 }}",
+          "phoneNumber": "={{ $('Normalize & Score Lead').item.json.phone }}",
+          "type": "PROSPECT",
+          "websiteUrl": "={{ $('Normalize & Score Lead').item.json.website }}",
+          "yearFounded": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.foundedYear }}"
+        }
+      },
+      "id": "7cfd962b-187a-4e54-b730-1a90751c0431",
+      "name": "Upsert Company",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        51504,
+        17328
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "mzKryyzwVkRH1AZ8",
+          "name": "HubSpot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "email": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.email }}",
+        "additionalFields": {
+          "annualRevenue": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.estimatedRevenue }}",
+          "buyingRole": [
+            "EXECUTIVE_SPONSOR",
+            "DECISION_MAKER"
+          ],
+          "city": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.companyCity }}",
+          "clickedFacebookAd": "={{ $('Normalize & Score Lead').item.json.isFacebookAd }}",
+          "companyName": "={{ $('Normalize & Score Lead').item.json.companyName }}",
+          "companySize": "={{ $('Normalize & Score Lead').item.json.companySize }}",
+          "country": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.companyCountry }}",
+          "firstName": "={{ $('Normalize & Score Lead').item.json.firstName }}",
+          "industry": "={{ $('Normalize & Score Lead').item.json.industry }}",
+          "jobTitle": "={{ $('Normalize & Score Lead').item.json.jobTitle }}",
+          "lastName": "={{ $('Normalize & Score Lead').item.json.lastName }}",
+          "latestTrafficSource": "SOCIAL_MEDIA",
+          "leadStatus": "NEW",
+          "linkedinUrl": "={{ $('Clearbit CRM Enrichment (Mock API)').item.json.enrichedData.linkedinCompanyPage }}",
+          "message": "={{ $('Normalize & Score Lead').item.json.inquiry }}",
+          "mobilePhoneNumber": "={{ $('Normalize & Score Lead').item.json.phone }}",
+          "websiteUrl": "={{ $('Normalize & Score Lead').item.json.website }}"
+        },
+        "options": {
+          "resolveData": false
+        }
+      },
+      "id": "7731977e-41a5-40d2-9acc-d03f2a5a3a17",
+      "name": "Upsert Lead Record",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        51744,
+        17328
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "mzKryyzwVkRH1AZ8",
+          "name": "HubSpot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "engagement",
+        "type": "task",
+        "dueDate": "2026-03-26T00:00:00",
+        "metadata": {
+          "body": "={{ 'Action Required: Fast Follow-up with ' + $('Normalize & Score Lead').item.json.firstName + ' regarding their inbound inquiry.\\n\\n=== AI Research Dossier ===\\n\\n' + $('Autonomous SDR').item.json.output }}",
+          "forObjectType": "CONTACT",
+          "status": "NOT_STARTED"
+        },
+        "additionalFields": {}
+      },
+      "id": "29ae27ca-f39f-4f39-b81d-90ceda55ff99",
+      "name": "Follow-up Task",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        51968,
+        17312
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "mzKryyzwVkRH1AZ8",
+          "name": "HubSpot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#all-personal-automation",
+          "mode": "name"
+        },
+        "text": "={{ '🚨 *HOT LEAD ALERT* 🚨\\n*Name:* ' + $('Normalize & Score Lead').item.json.firstName + ' ' + $('Normalize & Score Lead').item.json.lastName + '\\n*Company:* ' + $('Normalize & Score Lead').item.json.companyName + ' (' + $('Normalize & Score Lead').item.json.companySize + ' employees)\\n*Lead Score:* ' + $('Normalize & Score Lead').item.json.leadScore + '\\n\\n*AI Research Dossier:*\\n' + $('Autonomous SDR').item.json.output }}",
+        "otherOptions": {}
+      },
+      "id": "722a48b8-1785-468c-9663-cc5429051f29",
+      "name": "Hot Lead Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        52288,
+        17296
+      ],
+      "webhookId": "b1cf697e-d3fb-47bb-bed6-a616d50ffd03",
+      "credentials": {
+        "slackApi": {
+          "id": "ILZE2VxH1aLB7CkY",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/api/v1/mixed_people/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "YOUR_APOLLO_API_KEY_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"q_person_name\": \"{{ $('Normalize & Score Lead').item.json.firstName }} {{ $('Normalize & Score Lead').item.json.lastName }}\",\n  \"q_organization_domains\": [\"{{ $('Normalize & Score Lead').item.json.website }}\"],\n  \"person_titles\": [\"{{ $('Normalize & Score Lead').item.json.jobTitle }}\"],\n  \"page\": 1,\n  \"per_page\": 1\n}",
+        "options": {}
+      },
+      "id": "73064d6d-2bd0-4f65-a35f-527a4e4c5855",
+      "name": "Apollo People Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        50288,
+        17280
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        50848,
+        17888
+      ],
+      "id": "fa2b78fe-8d67-46df-a56a-8a17f279dbf4",
+      "name": "Embeddings",
+      "credentials": {
+        "openAiApi": {
+          "id": "xKhgnNSMCe80uOvX",
+          "name": "Groq/OpenAi account 3"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Vector DB: In-Memory Portfolio Store": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Case Study Internal Retrieval",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Autonomous SDR": {
+      "main": [
+        [
+          {
+            "node": "Upsert Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Score Lead": {
+      "main": [
+        [
+          {
+            "node": "Apollo People Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inbound Lead Capture": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Score Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualification Gate": {
+      "main": [
+        [
+          {
+            "node": "Autonomous SDR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The Agent Brain": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Autonomous SDR",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Case Study Internal Retrieval": {
+      "ai_tool": [
+        [
+          {
+            "node": "Autonomous SDR",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " Live Web Researcher": {
+      "ai_tool": [
+        [
+          {
+            "node": "Autonomous SDR",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result Summarizer": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Case Study Internal Retrieval",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Company": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead Record": {
+      "main": [
+        [
+          {
+            "node": "Follow-up Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Follow-up Task": {
+      "main": [
+        [
+          {
+            "node": "Hot Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo People Search": {
+      "main": [
+        [
+          {
+            "node": "Qualification Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Vector DB: In-Memory Portfolio Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 3600,
+    "timeSavedPerExecution": 5
+  },
+  "versionId": "afa7caf2-6d46-417e-979d-688ab7263f03",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2c1ffb24a3e87a83c31fa78345cf69ea846fd59e85614b2c56d330945db7d253"
+  },
+  "id": "L3hmR0Q9dlEI8e0o",
+  "tags": []
+}
