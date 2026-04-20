@@ -1,0 +1,1864 @@
+{
+  "name": "AI Email Triage and Calendar Booking Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## How this workflow runs\n\n**1  -  Ingest**  \nGmail \u2192 **Prepare Email Fields** \u2192 **Decode Email Text** (readable body for DB) \u2192 **Postgres Insert** \u2192 **Is New Email?** (duplicate \u2192 **Skip Duplicate**).\n\n**2  -  Triage**  \n**LLM: Triage** + **Groq Chat: Triage** \u2192 **Parse Triage** (confidence + category) \u2192 **Save Triage To DB** \u2192 **Log Triage Event**.\n\n**3  -  Route**  \n**Low Triage Confidence?** \u2192 yes: mark processed, log skip, stop.  \n**Is Noise?** \u2192 yes: ignored + log, stop.  \n**Is Operational?** \u2192 yes: draft \u2192 **Operational Send OK?** \u2192 Gmail send or processed.  \n\u2192 no (meeting category): **Meeting: Scheduling Ready?** (`meeting` + `meeting_clarity: clear`)  \n\u2003\u2022 **No** (ambiguous / vague meeting): **LLM: Meeting Clarify** \u2192 clarify reply only  -  **no Google Calendar**, no slot engine.  \n\u2003\u2022 **Yes**: **Postgres: Booked Slot Times** \u2192 **Get Calendar Events** \u2192 **Compute Free Slots** \u2192 booking-link-only OR **LLM: Draft Meeting** \u2192 **Merge Meeting Draft** \u2192 **Meeting Send OK?** \u2192 **Gmail Send Meeting** (plain text) \u2192 **Has Valid Slots?** (`auto_book_eligible` when exact requested slot is free and `AUTO_BOOK_ON_EXACT_MATCH` is true) \u2192 optional create + Slack \u2192 DB + log.\n\n**Edit numbers in Code:** **Parse Triage** (thresholds), **Compute Free Slots** (timezone, hours, caps; `BOOKING_PAGE_URL` via placeholder). No `$env` in expressions (n8n Cloud).\n\n**Slack:** native **Slack** node  -  OAuth credential + channel (placeholder `#meetings`; change in UI).",
+        "height": 640,
+        "width": 460,
+        "color": 7
+      },
+      "id": "8facd7d1-775d-4e38-b39a-3437214dd561",
+      "name": "How this workflow runs",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Rule: Noise\nIf triage returns `noise`, do not reply.\nMark email as ignored and log `noise_ignored` for audit.",
+        "height": 140,
+        "width": 320,
+        "color": 5
+      },
+      "id": "bfc34df5-dcd1-45b9-8db7-bd1e2161a8fb",
+      "name": "Rule Note: Noise",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2300,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Rule: Operational\nIf triage returns `operational`, draft a normal professional reply.\nSend only when confidence passes send threshold.\nNo calendar slot engine on this branch.",
+        "height": 170,
+        "width": 340,
+        "color": 4
+      },
+      "id": "7cd0c6f1-717e-4082-aa40-ab3c95adf2d0",
+      "name": "Rule Note: Operational",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Rule: Meeting Ambiguous\nIf `meeting_clarity` is `ambiguous`, send booking-link-first reply.\nDo not propose slots.\nDo not run Google Calendar checks.\nDo not run slot computation.",
+        "height": 190,
+        "width": 360,
+        "color": 6
+      },
+      "id": "34e2bb19-db68-4a17-a9b0-a2a606c0096f",
+      "name": "Rule Note: Meeting Ambiguous",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Rule: Meeting Clear\nIf `meeting_clarity` is `clear`, run booked-times query + calendar busy check + slot logic.\nIf requested time is unavailable, send booking-link-only reply.\nIf exact requested time is free and auto-book is enabled, create event and send Slack notice.",
+        "height": 220,
+        "width": 390,
+        "color": 3
+      },
+      "id": "6bba2789-048e-474b-a5b3-eab0fcdfc1f8",
+      "name": "Rule Note: Meeting Clear",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3360,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "id": "d3fea11c-fa73-4710-8d5f-57d8fdede1f4",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_GMAIL",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "msg_id",
+              "type": "string",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "id": "a2",
+              "name": "thread_id",
+              "type": "string",
+              "value": "={{ $json.threadId }}"
+            },
+            {
+              "id": "a3",
+              "name": "from_email",
+              "type": "string",
+              "value": "={{ ($json.from?.value?.[0]?.address) || (($json.From || '').match(/<([^>]+)>/)?.[1]) || ($json.From || '').trim() || 'unknown@example.com' }}"
+            },
+            {
+              "id": "a4",
+              "name": "subject",
+              "type": "string",
+              "value": "={{ $json.subject || $json.Subject || '' }}"
+            },
+            {
+              "id": "a5",
+              "name": "received_at",
+              "type": "string",
+              "value": "={{ $json.date ? new Date($json.date).toISOString() : new Date().toISOString() }}"
+            },
+            {
+              "id": "a6",
+              "name": "raw_text",
+              "type": "string",
+              "value": "={{ $json.textPlain || $json.textHtml || $json.snippet || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2706c131-4182-4d35-a370-61d053437502",
+      "name": "Prepare Email Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\n\nfunction decodeHtmlEntities(input) {\n  let s = String(input ?? '');\n  s = s.replace(/&#(\\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));\n  s = s.replace(/&#x([\\da-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));\n  const map = {\n    '&quot;': '\"',\n    '&apos;': \"'\",\n    '&#39;': \"'\",\n    '&lt;': '<',\n    '&gt;': '>',\n    '&nbsp;': ' ',\n    '&ndash;': '\\u2013',\n    '&mdash;': '\\u2014',\n    '&amp;': '&'\n  };\n  for (const [k, v] of Object.entries(map)) {\n    s = s.split(k).join(v);\n  }\n  return s;\n}\n\nfunction stripHtml(html) {\n  return String(html).replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nconst subject = decodeHtmlEntities(j.subject);\nlet raw = decodeHtmlEntities(j.raw_text || '');\nif (/<[a-z][\\s\\S]*>/i.test(raw)) {\n  raw = stripHtml(raw);\n}\n\nreturn [{ json: { ...j, subject, raw_text: raw } }];"
+      },
+      "id": "89ead0a0-9995-4277-8338-cfd9150fa734",
+      "name": "Decode Email Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        330,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO emails (\n  gmail_message_id, thread_id, from_email, subject, received_at, raw_text, status\n) VALUES ($1, $2, $3, $4, $5, $6, 'pending')\nON CONFLICT (gmail_message_id) DO NOTHING\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.msg_id,\n  $json.thread_id,\n  $json.from_email,\n  $json.subject,\n  $json.received_at,\n  $json.raw_text\n] }}"
+        }
+      },
+      "id": "a454ebfd-c2df-49f6-89ea-9b01c77ca8a6",
+      "name": "Postgres Insert Email",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        300
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.id !== undefined && $json.id !== null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "02561687-0abd-426e-a1ae-8bcdf10ed45e",
+      "name": "Is New Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "46234f80-db3f-4c67-a351-95ae96fc531a",
+      "name": "Skip Duplicate",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        880,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "email_id",
+              "type": "string",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "de8acb53-b629-4781-bd76-0c5ea5974211",
+      "name": "Store Email Record ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        880,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "f86eb449-84bb-4d40-9e76-385a7c4e2f28",
+      "name": "Groq Chat: Triage",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        340
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "CONFIGURE_GROQ",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You classify inbound email for an assistant. Reply with ONLY valid JSON, no markdown, no code fences.\n\nCategories (pick exactly one):\n- noise = newsletters, receipts, automated updates, FYI, no reply needed\n- operational = needs a written reply but not scheduling a live conversation\n- meeting = they want to schedule a call, video meeting, or in-person sync\n\nWhen category is \"meeting\", you MUST also set meeting_clarity:\n- clear = they gave enough to act on scheduling: a specific day and/or time, OR a concrete window (e.g. \"Tuesday 3pm\", \"next Wed morning\", \"week of April 20\", \"are you free Thursday afternoon CET?\"). Short questions like \"30 min Thursday?\" count as clear.\n- ambiguous = scheduling vibe only: \"let's sync\", \"grab coffee\", \"we should connect\", \"can we find time?\", forwarding threads with no proposed slot, or no timeframe at all.\n\nIf you are unsure, prefer ambiguous (safer: no calendar automation).\n\nReturn exactly this JSON shape:\n{\"category\":\"noise|operational|meeting\",\"meeting_clarity\":\"n_a|clear|ambiguous\",\"confidence\":0.0,\"reason\":\"short\"}\nUse meeting_clarity \"n_a\" when category is not meeting.\n\nSubject: {{ $('Prepare Email Fields').first().json.subject }}\nFrom: {{ $('Prepare Email Fields').first().json.from_email }}\nBody:\n{{ $('Prepare Email Fields').first().json.raw_text }}",
+        "batching": {}
+      },
+      "id": "4c9edadf-4d5a-46b8-8f7a-4a546c0727e4",
+      "name": "LLM: Triage",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1100,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const T_TRIAGE_MIN = 0.65;\nconst T_SEND_MIN = 0.7;\nconst raw = $input.first().json;\nconst content = raw.text || raw.output || raw.response || raw.choices?.[0]?.message?.content || raw.message?.content || '{}';\nlet triage = { category: 'noise', confidence: 0, reason: 'parse_error', meeting_clarity: 'n_a' };\ntry {\n  const cleaned = String(content).replace(/```json\\s*/g, '').replace(/```/g, '').trim();\n  triage = JSON.parse(cleaned);\n} catch (e) {}\nlet cat = String(triage.category || 'noise').toLowerCase();\nif (!['noise', 'operational', 'meeting'].includes(cat)) cat = 'noise';\nlet mc = String(triage.meeting_clarity || '').toLowerCase();\nif (!['clear', 'ambiguous', 'n_a'].includes(mc)) mc = 'n_a';\nif (cat !== 'meeting') {\n  mc = 'n_a';\n} else if (mc === 'n_a' || mc === '') {\n  mc = 'ambiguous';\n}\nconst conf = Math.min(1, Math.max(0, parseFloat(triage.confidence) || 0));\nconst prep = $('Prepare Email Fields').first().json;\nconst emailId = $('Store Email Record ID').first().json.email_id;\nconst meeting_scheduling_ready = cat === 'meeting' && mc === 'clear';\nreturn [{\n  json: {\n    email_id: emailId,\n    msg_id: prep.msg_id,\n    thread_id: prep.thread_id,\n    from_email: prep.from_email,\n    subject: prep.subject,\n    raw_text: prep.raw_text,\n    category: cat,\n    meeting_clarity: mc,\n    confidence: conf,\n    reason: String(triage.reason || ''),\n    below_triage_min: conf < T_TRIAGE_MIN,\n    send_threshold_met: conf >= T_SEND_MIN,\n    triage_min: T_TRIAGE_MIN,\n    send_min: T_SEND_MIN,\n    meeting_scheduling_ready: meeting_scheduling_ready,\n    booking_page_url: 'https://calendar.app.google/nV7E9Yx59Z5nG9og6'\n  }\n}];"
+      },
+      "id": "bc6cc16b-88ce-42b7-95fa-bb50d2c6bcaa",
+      "name": "Parse Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails\nSET triage_category = $1,\n    triage_confidence = $2,\n    meeting_clarity = $3,\n    updated_at = now()\nWHERE id = $4::uuid\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.category,\n  $json.confidence,\n  $json.meeting_clarity,\n  $json.email_id\n] }}"
+        }
+      },
+      "id": "26aa2b36-6b43-4e41-9722-1dca606dd6b3",
+      "name": "Save Triage To DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1540,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_events (email_id, step, payload)\nVALUES ($1::uuid, $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Parse Triage').item.json.email_id,\n  'triage',\n  JSON.stringify({ category: $('Parse Triage').item.json.category, meeting_clarity: $('Parse Triage').item.json.meeting_clarity, confidence: $('Parse Triage').item.json.confidence, reason: $('Parse Triage').item.json.reason })\n] }}"
+        }
+      },
+      "id": "6d293f4f-53c6-4323-8fe9-49b3133582ab",
+      "name": "Log Triage Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1760,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "lc",
+              "leftValue": "={{ $('Parse Triage').item.json.below_triage_min === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f9d0c7a1-058a-4e50-aae9-bb13ff387565",
+      "name": "Low Triage Confidence?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1980,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'processed', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Parse Triage').item.json.email_id] }}"
+        }
+      },
+      "id": "557125f6-1db8-47ff-9657-e5896219afbc",
+      "name": "Mark Processed No Send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2200,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_events (email_id, step, payload) VALUES ($1::uuid, $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Parse Triage').item.json.email_id,\n  'skipped_low_confidence',\n  JSON.stringify({ triage_min: $('Parse Triage').item.json.triage_min })\n] }}"
+        }
+      },
+      "id": "ae3fdc5f-4e92-4191-8fe5-c882d16d38be",
+      "name": "Log Skip Low Conf",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2420,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "n1",
+              "leftValue": "={{ $('Parse Triage').item.json.category === 'noise' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d09fb151-8cc7-4269-a965-37437076dcad",
+      "name": "Is Noise?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2200,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'ignored', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Parse Triage').item.json.email_id] }}"
+        }
+      },
+      "id": "ecbe0c7b-54b5-4386-893b-bdde86639f47",
+      "name": "Mark Ignored",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2420,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_events (email_id, step, payload) VALUES ($1::uuid, 'noise_ignored', '{}'::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$('Parse Triage').item.json.email_id] }}"
+        }
+      },
+      "id": "b6c7e5f1-6fc1-41cb-b3d5-d895cb2d48d6",
+      "name": "Log Noise",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2640,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "o1",
+              "leftValue": "={{ $('Parse Triage').item.json.category === 'operational' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "083b06e0-1695-494f-9412-dbd9f2470d12",
+      "name": "Is Operational?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2420,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "msr",
+              "leftValue": "={{ $('Parse Triage').item.json.meeting_scheduling_ready === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "793573ca-4d11-4d24-b545-18bae0134806",
+      "name": "Meeting: Scheduling Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2520,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "7667b3fd-1921-4ac0-91c5-4a55ab713005",
+      "name": "Groq Chat: Operational",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        280
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "CONFIGURE_GROQ",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You write professional email replies. Output ONLY the reply body (no subject line).\n\nUse a blank line between greeting, body, and sign-off. Do not send one dense paragraph.\n\nSubject: {{ $('Parse Triage').first().json.subject }}\nFrom: {{ $('Parse Triage').first().json.from_email }}\n\nTheir message:\n{{ $('Parse Triage').first().json.raw_text }}",
+        "batching": {}
+      },
+      "id": "4d57c992-b64b-4897-ae09-804f4b874093",
+      "name": "LLM: Draft Operational",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst body = r.text || r.output || r.response || r.choices?.[0]?.message?.content || '';\nconst p = $('Parse Triage').first().json;\nreturn [{ json: { ...p, draft_body: String(body || '').trim() } }];"
+      },
+      "id": "4fc44923-3451-457a-bedd-2924e1ddafd3",
+      "name": "Extract Operational Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "sok",
+              "leftValue": "={{ $json.send_threshold_met === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b80be363-4392-461b-9c77-84ffb65d3458",
+      "name": "Operational Send OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3080,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "emailType": "text",
+        "messageId": "={{ $json.msg_id }}",
+        "message": "={{ $json.draft_body }}",
+        "options": {}
+      },
+      "id": "7b125b5a-441b-4ee7-b10f-d05d1ce4f2df",
+      "name": "Gmail Send Operational",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3300,
+        40
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_GMAIL",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'sent', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Extract Operational Draft').item.json.email_id] }}"
+        }
+      },
+      "id": "724e3a07-8dcd-4c10-b345-3e7cb80447c0",
+      "name": "Mark Sent Operational",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3520,
+        40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_events (email_id, step, payload) VALUES ($1::uuid, 'sent_operational', $2::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Extract Operational Draft').item.json.email_id,\n  JSON.stringify({ auto: true })\n] }}"
+        }
+      },
+      "id": "1b3fbff6-e841-4e6e-8534-c2652514a745",
+      "name": "Log Sent Operational",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3740,
+        40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'processed', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Extract Operational Draft').item.json.email_id] }}"
+        }
+      },
+      "id": "c66658f4-a5f3-42af-a018-271559555395",
+      "name": "Mark Processed Op No Send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3300,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.35
+        }
+      },
+      "id": "cf866ae8-72c3-44e4-9833-a70ca8de4039",
+      "name": "Groq Chat: Meeting Clarify",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        520
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "CONFIGURE_GROQ",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You write short, professional plain-text email replies. Output ONLY the reply body (no subject line).\n\nThis message is an **ambiguous meeting request**: the sender has not given enough detail to schedule directly. Your job is to send a **booking-link-first** reply.\n\nRules:\n- Greet using a natural line with their first name if you can infer it from the From line context; otherwise \"Hi,\".\n- Keep it short: one to three short paragraphs, no bullet list.\n- Explicitly say they can book a suitable time using the booking link below.\n- Do not ask for 2-3 time windows.\n- Do not list proposed availability.\n- Do not promise unverified times.\n- Never use placeholders like [Name].\n\nBooking link (include it in the reply): https://calendar.app.google/nV7E9Yx59Z5nG9og6\n\nSubject: {{ $('Parse Triage').first().json.subject }}\nFrom: {{ $('Parse Triage').first().json.from_email }}\n\nTheir message:\n{{ $('Parse Triage').first().json.raw_text }}",
+        "batching": {}
+      },
+      "id": "9ca230d9-f558-4dfc-a09b-f6854e7d209c",
+      "name": "LLM: Meeting Clarify",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2640,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst body = r.text || r.output || r.response || r.choices?.[0]?.message?.content || '';\nconst p = $('Parse Triage').first().json;\nreturn [{ json: { ...p, draft_body: String(body || '').trim() } }];"
+      },
+      "id": "f3e617f4-decd-49cd-a05c-3690f143ac01",
+      "name": "Extract Clarify Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cok",
+              "leftValue": "={{ $json.send_threshold_met === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6ed2a6fe-7964-4d2b-9eef-6d1bbb2a0e6a",
+      "name": "Clarify Send OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3080,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "emailType": "text",
+        "messageId": "={{ $json.msg_id }}",
+        "message": "={{ $json.draft_body }}",
+        "options": {}
+      },
+      "id": "5c1dcbe9-9a8e-49b7-a737-d57512aa812d",
+      "name": "Gmail Send Clarify",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3300,
+        280
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_GMAIL",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'sent', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Extract Clarify Draft').item.json.email_id] }}"
+        }
+      },
+      "id": "ca0d1a4b-8bc6-4b97-b04b-f12f39a3b4a9",
+      "name": "Mark Sent Clarify",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3520,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_events (email_id, step, payload) VALUES ($1::uuid, $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Extract Clarify Draft').item.json.email_id,\n  'sent_meeting_clarify',\n  JSON.stringify({ meeting_clarity: 'ambiguous', reason: $('Extract Clarify Draft').item.json.reason })\n] }}"
+        }
+      },
+      "id": "94b3ac8f-a330-47d7-8663-3fecd710ee6b",
+      "name": "Log Sent Clarify",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3740,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'processed', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Extract Clarify Draft').item.json.email_id] }}"
+        }
+      },
+      "id": "c25f578e-f501-4548-a2c8-dfeaace2a2f5",
+      "name": "Mark Processed Clarify No Send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3300,
+        440
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(\n  json_agg(elem ORDER BY elem),\n  '[]'::json\n) AS booked_starts\nFROM (\n  SELECT DISTINCT trim(payload->>'slot_start') AS elem\n  FROM processing_events\n  WHERE step = 'sent_meeting'\n    AND nullif(trim(payload->>'slot_start'), '') IS NOT NULL\n) sub;",
+        "options": {}
+      },
+      "id": "300b3c5b-57f4-468c-a45e-b841d71f6a64",
+      "name": "Postgres: Booked Slot Times",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2520,
+        360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ new Date().toISOString() }}",
+        "timeMax": "={{ new Date(Date.now() + 21 * 86400000).toISOString() }}",
+        "options": {
+          "orderBy": "startTime",
+          "recurringEventHandling": "expand"
+        }
+      },
+      "id": "65e09db0-e3a8-409b-8b1e-6bdb21e12ef3",
+      "name": "Get Calendar Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        2640,
+        360
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "CONFIGURE_CAL",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const WORK_TZ = 'Africa/Lagos';\nconst SEARCH_DAYS = 21;\nconst SLOT_MIN = 30;\nconst WORK_START = 9 * 60;\nconst WORK_END = 17 * 60;\nconst MAX_BOOKINGS_PER_DAY = 3;\nconst MAX_BOOKINGS_PER_WEEK = 3;\nconst WINDOW_DAYS_FIRST = 7;\nconst WINDOW_DAYS_TOTAL = 14;\nconst BOOKING_PAGE_URL = 'https://calendar.app.google/nV7E9Yx59Z5nG9og6';\n/** When true: if the sender named a specific day+time and that slot is free, create one calendar event for that slot after send. No auto-book for vague meeting asks or substitute times. */\nconst AUTO_BOOK_ON_EXACT_MATCH = true;\n\nconst email = $('Store Email Record ID').first().json;\nconst prep = $('Prepare Email Fields').first().json;\nconst combinedText = (String(prep.subject || '') + ' ' + String(prep.raw_text || '')).trim();\n\nlet bookedRaw = $('Postgres: Booked Slot Times').first().json.booked_starts;\nif (bookedRaw == null) bookedRaw = [];\nif (typeof bookedRaw === 'string') {\n  try { bookedRaw = JSON.parse(bookedRaw); } catch (e) { bookedRaw = []; }\n}\nconst bookedMs = (Array.isArray(bookedRaw) ? bookedRaw : [])\n  .map((s) => new Date(s).getTime())\n  .filter((x) => Number.isFinite(x));\n\nfunction dayKey(ms) {\n  return new Date(ms).toLocaleDateString('en-CA', { timeZone: WORK_TZ });\n}\nfunction weekKeyUtc(ms) {\n  const date = new Date(ms);\n  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));\n  const dayNum = d.getUTCDay() || 7;\n  d.setUTCDate(d.getUTCDate() + 4 - dayNum);\n  const year = d.getUTCFullYear();\n  const week1 = new Date(Date.UTC(year, 0, 4));\n  const weekNo = Math.ceil((((d - week1) / 86400000) + 1) / 7);\n  return year + '-W' + String(weekNo).padStart(2, '0');\n}\nfunction countBookedDay(ms) {\n  const k = dayKey(ms);\n  return bookedMs.filter((t) => dayKey(t) === k).length;\n}\nfunction countBookedWeek(ms) {\n  const k = weekKeyUtc(ms);\n  return bookedMs.filter((t) => weekKeyUtc(t) === k).length;\n}\nfunction canBookSlot(ms) {\n  return countBookedDay(ms) < MAX_BOOKINGS_PER_DAY && countBookedWeek(ms) < MAX_BOOKINGS_PER_WEEK;\n}\n\nfunction parsePreferredWeekdays(text) {\n  const t = String(text || '').toLowerCase();\n  const pairs = [\n    ['sunday', 0], ['monday', 1], ['tuesday', 2], ['wednesday', 3],\n    ['thursday', 4], ['friday', 5], ['saturday', 6],\n    ['sun', 0], ['mon', 1], ['tue', 2], ['tues', 2], ['wed', 3], ['thu', 4], ['thur', 4], ['thurs', 4], ['fri', 5], ['sat', 6]\n  ];\n  const found = new Set();\n  for (const [word, d] of pairs) {\n    const re = new RegExp('\\\\b' + word + '\\\\b', 'i');\n    if (re.test(t)) found.add(d);\n  }\n  return found;\n}\n\nfunction parseTimeWindowMins(text) {\n  const t = String(text || '').toLowerCase();\n  const wantsAfternoon = /\\bafternoon\\b|after\\s*noon|after\\s+noon/i.test(t);\n  const wantsMorning = /\\bmorning\\b|before\\s*noon|before\\s+noon/i.test(t);\n  let minStartMins = WORK_START;\n  let maxStartMins = WORK_END - SLOT_MIN;\n  if (wantsAfternoon && !wantsMorning) {\n    minStartMins = Math.max(WORK_START, 12 * 60);\n  } else if (wantsMorning && !wantsAfternoon) {\n    maxStartMins = Math.min(12 * 60 - SLOT_MIN, WORK_END - SLOT_MIN);\n  }\n  if (minStartMins > maxStartMins) {\n    minStartMins = WORK_START;\n    maxStartMins = WORK_END - SLOT_MIN;\n  }\n  return { minStartMins, maxStartMins };\n}\n\nfunction localWeekday(ms) {\n  const wp = new Intl.DateTimeFormat('en-US', { timeZone: WORK_TZ, weekday: 'short' }).formatToParts(new Date(ms))\n    .find((p) => p.type === 'weekday');\n  const w = wp && wp.value ? wp.value : 'Mon';\n  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };\n  return map[w.slice(0, 3)] ?? 0;\n}\n\nfunction localParts(ms) {\n  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: WORK_TZ, hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' });\n  const p = Object.fromEntries(fmt.formatToParts(new Date(ms)).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));\n  const h = parseInt(p.hour, 10);\n  const m = parseInt(p.minute, 10);\n  return { mins: h * 60 + m };\n}\nfunction isWeekend(ms) {\n  const w = new Intl.DateTimeFormat('en-US', { timeZone: WORK_TZ, weekday: 'short' }).format(new Date(ms));\n  return w === 'Sat' || w === 'Sun';\n}\n\nconst items = $input.all();\nconst busy = [];\nfor (const it of items) {\n  const j = it.json;\n  if (!j.start || j.status === 'cancelled') continue;\n  if (j.transparency === 'transparent') continue;\n  if (j.start.dateTime && j.end?.dateTime) {\n    const a = new Date(j.start.dateTime).getTime();\n    const b = new Date(j.end.dateTime).getTime();\n    if (Number.isFinite(a) && Number.isFinite(b) && b > a) busy.push([a, b]);\n  }\n}\nbusy.sort((x, y) => x[0] - y[0]);\n\nfunction overlaps(t0, t1) {\n  return busy.some(([a, b]) => t0 < b && t1 > a);\n}\n\nconst dur = SLOT_MIN * 60000;\nconst preferSet = parsePreferredWeekdays(combinedText);\nconst strictPreferred = preferSet.size > 0;\nlet { minStartMins, maxStartMins } = parseTimeWindowMins(combinedText);\n\nfunction scanRange(fromMs, toMs, weekdaySet, twMin, twMax) {\n  const lo = twMin != null ? twMin : minStartMins;\n  const hi = twMax != null ? twMax : maxStartMins;\n  const found = [];\n  let t = fromMs;\n  while (t < toMs && found.length < 8) {\n    if (isWeekend(t)) { t += 30 * 60000; continue; }\n    const c = localParts(t);\n    if (c.mins % 30 !== 0) { t += 60000; continue; }\n    if (c.mins < lo || c.mins > hi || c.mins + SLOT_MIN > WORK_END) { t += 30 * 60000; continue; }\n    if (weekdaySet && !weekdaySet.has(localWeekday(t))) { t += 30 * 60000; continue; }\n    const te = t + dur;\n    if (overlaps(t, te)) { t += 30 * 60000; continue; }\n    if (!canBookSlot(t)) { t += 30 * 60000; continue; }\n    found.push(t);\n    t += 30 * 60000;\n  }\n  return found;\n}\n\nfunction toSlotObjs(timestamps) {\n  return timestamps.slice(0, 6).map((t) => ({\n    start: new Date(t).toISOString(),\n    end: new Date(t + dur).toISOString(),\n    display: new Date(t).toLocaleString('en-US', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: WORK_TZ })\n  }));\n}\n\nfunction slotViable(t) {\n  if (isWeekend(t)) return false;\n  const lp = localParts(t);\n  if (lp.mins < WORK_START || lp.mins + SLOT_MIN > WORK_END) return false;\n  if (overlaps(t, t + dur)) return false;\n  if (!canBookSlot(t)) return false;\n  return true;\n}\n\nfunction parseExplicitDayAndTime(text) {\n  const lower = String(text || '').toLowerCase();\n  const pairs = [\n    ['sunday', 0], ['monday', 1], ['tuesday', 2], ['wednesday', 3],\n    ['thursday', 4], ['friday', 5], ['saturday', 6],\n    ['sun', 0], ['mon', 1], ['tue', 2], ['wed', 3], ['thu', 4], ['thur', 4], ['thurs', 4], ['fri', 5], ['sat', 6]\n  ];\n  let dow = -1;\n  for (const [word, d] of pairs) {\n    if (new RegExp('\\\\b' + word + '\\\\b', 'i').test(lower)) { dow = d; break; }\n  }\n  let wantMins = null;\n  let mm = lower.match(/\\b(\\d{1,2}):(\\d{2})\\s*(am|pm)\\b/);\n  if (mm) {\n    let h = parseInt(mm[1], 10);\n    const mi = parseInt(mm[2], 10);\n    const ap = mm[3];\n    if (ap === 'pm' && h < 12) h += 12;\n    if (ap === 'am' && h === 12) h = 0;\n    wantMins = h * 60 + mi;\n  } else {\n    mm = lower.match(/\\b(\\d{1,2})\\s*(am|pm)\\b/);\n    if (mm) {\n      let h = parseInt(mm[1], 10);\n      const ap = mm[2];\n      if (ap === 'pm' && h < 12) h += 12;\n      if (ap === 'am' && h === 12) h = 0;\n      wantMins = h * 60;\n    }\n  }\n  if (dow < 0 || wantMins == null) return { parseable: false };\n  return { parseable: true, dow, wantMins };\n}\n\nfunction findStartMsForDayAndTime(dow, wantMins, fromMs, toMs) {\n  const snapped = Math.round(wantMins / 30) * 30;\n  if (snapped < WORK_START || snapped > WORK_END - SLOT_MIN) return null;\n  let t = Math.ceil(fromMs / (30 * 60000)) * (30 * 60000);\n  while (t < toMs) {\n    if (isWeekend(t)) { t += 30 * 60000; continue; }\n    if (localWeekday(t) !== dow) { t += 30 * 60000; continue; }\n    if (localParts(t).mins !== snapped) { t += 30 * 60000; continue; }\n    return t;\n  }\n  return null;\n}\n\nfunction formatRequestedSummary(dow, wantMins) {\n  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n  let h = Math.floor(wantMins / 60);\n  const m = wantMins % 60;\n  const ap = h >= 12 ? 'PM' : 'AM';\n  const h12 = h % 12 === 0 ? 12 : h % 12;\n  const mm = m === 0 ? '' : ':' + String(m).padStart(2, '0');\n  return days[dow] + ' at ' + h12 + mm + ' ' + ap;\n}\n\nconst now = Date.now();\nconst startScan = now + 5 * 60000;\nconst endTotal = startScan + WINDOW_DAYS_TOTAL * 86400000;\nconst splitA = startScan + WINDOW_DAYS_FIRST * 86400000;\n\nlet availability_hint = '';\nlet tsMs = [];\nlet used_next_segment = false;\n\nif (strictPreferred) {\n  let ts = scanRange(startScan, splitA, preferSet, minStartMins, maxStartMins);\n  if (ts.length === 0) {\n    ts = scanRange(splitA, endTotal, preferSet, minStartMins, maxStartMins);\n    if (ts.length > 0) used_next_segment = true;\n  }\n  if (ts.length === 0) {\n    ts = scanRange(startScan, splitA, null, minStartMins, maxStartMins);\n    if (ts.length === 0) {\n      ts = scanRange(splitA, endTotal, null, minStartMins, maxStartMins);\n      if (ts.length > 0) used_next_segment = true;\n    }\n    if (ts.length > 0) {\n      availability_hint = 'Their preferred weekdays (and time of day) are fully booked or blocked in the search window. The times below are on other weekdays  -  say that clearly and ask them to confirm.';\n    }\n  }\n  if (ts.length === 0) {\n    availability_hint = 'There is no slot matching their weekday and time-of-day preferences in the next two weeks (or limits are full). Apologize briefly, invite them to use the booking link, and offer to follow up manually.';\n  } else if (used_next_segment && !availability_hint) {\n    availability_hint = 'Earlier days did not have a matching slot (preferences or booking limits). The times below are in a later week  -  say that clearly.';\n  }\n  tsMs = ts;\n} else {\n  let ts = scanRange(startScan, splitA, null, minStartMins, maxStartMins);\n  if (ts.length === 0) {\n    ts = scanRange(splitA, endTotal, null, minStartMins, maxStartMins);\n    if (ts.length > 0) {\n      used_next_segment = true;\n      availability_hint = 'Nothing was available in the first week (busy calendar or 3/day or 3/week limits). The times below are in the following week  -  explain that politely.';\n    }\n  }\n  if (ts.length === 0) {\n    availability_hint = 'No 30-minute openings in the next two weeks within work hours, or automated booking limits are full. Say you are fully booked for now, offer the booking link, and suggest checking next week.';\n  }\n  tsMs = ts;\n}\n\nlet slots = toSlotObjs(tsMs);\nlet has_slots = slots.length > 0;\n\nlet booking_link_only = false;\nlet auto_book_eligible = false;\nlet requested_summary = '';\nconst explicit = parseExplicitDayAndTime(combinedText);\nif (explicit.parseable) {\n  requested_summary = formatRequestedSummary(explicit.dow, explicit.wantMins);\n  const reqMs = findStartMsForDayAndTime(explicit.dow, explicit.wantMins, startScan, endTotal);\n  const ok = reqMs != null && slotViable(reqMs);\n  if (!ok) {\n    booking_link_only = true;\n    slots = [];\n    has_slots = false;\n    auto_book_eligible = false;\n    availability_hint = 'BOOKING_LINK_ONLY: They named a specific day and time that you cannot honor from this inbox (conflict, outside work hours, or booking limits). Do not list alternative times. One short paragraph + booking link only.';\n  } else {\n    const rest = tsMs.filter((x) => Math.abs(x - reqMs) >= 60000);\n    const merged = [reqMs, ...rest].slice(0, 6);\n    slots = toSlotObjs(merged);\n    has_slots = slots.length > 0;\n    auto_book_eligible = AUTO_BOOK_ON_EXACT_MATCH === true;\n    booking_link_only = false;\n    if (!availability_hint) {\n      availability_hint = AUTO_BOOK_ON_EXACT_MATCH\n        ? 'Their requested time is free; lead with that slot. You may list other options as bullets. A calendar hold may be created for the first slot after send when automation is on.'\n        : 'Their requested time appears free. Put that time first; you may add a few other options as bullets. Ask them to reply to confirm, or use the booking link so the calendar invite is created automatically.';\n    }\n  }\n}\n\nfunction senderFirstFromFrom(s) {\n  const from = String(s || '');\n  const q = from.match(/^([^<]+)</);\n  let n = '';\n  if (q) n = q[1].trim().replace(/^[\"']+|[\"']+$/g, '').split(/\\\\s+/)[0];\n  if (!n) n = from.split('@')[0].split(/[._+-]/)[0];\n  return n || 'there';\n}\n\nconst bookingUrl = BOOKING_PAGE_URL;\nreturn [{\n  json: {\n    email_id: email.email_id,\n    msg_id: prep.msg_id,\n    thread_id: prep.thread_id,\n    from_email: prep.from_email,\n    subject: prep.subject,\n    raw_text: prep.raw_text,\n    slots,\n    booking_url: bookingUrl,\n    has_slots: has_slots,\n    availability_hint,\n    preferred_weekdays: strictPreferred ? Array.from(preferSet).sort().join(',') : '',\n    booking_link_only,\n    auto_book_eligible,\n    requested_summary,\n    sender_first_name: senderFirstFromFrom(prep.from_email)\n  }\n}];"
+      },
+      "id": "7c4b91d9-a112-4cad-9436-e1f684405bf2",
+      "name": "Compute Free Slots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "blo",
+              "leftValue": "={{ $json.booking_link_only === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "014eca9e-70f5-4030-bdcd-5d6f5e6f1005",
+      "name": "Meeting: Booking Link Only?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2970,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.35
+        }
+      },
+      "id": "6379de90-e88d-48e7-b506-902aa42b054a",
+      "name": "Groq Chat: Meeting",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        3080,
+        520
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "CONFIGURE_GROQ",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You write concise professional email replies as plain text. Output ONLY the reply body (no subject line). Never use placeholders like [Name].\n\nFormatting (required):\n- Greeting on its own line using the sender first name below (if it is literally \"there\", use \"Hi,\" instead of a name).\n- Blank line, then short paragraphs with blank lines between them.\n- If you list more than one time, each time must be its own line starting with \"- \" (bullet list). Never put all times in one line.\n\nContent:\n- This workflow does not create calendar events from your reply. Propose times for them to confirm, or point them to the booking page for self-serve booking.\n- If \"Offered times\" is non-empty: put the best option first using each slot's \"display\" text; then optional bullets for other slots.\n- If \"Availability instructions\" is non-empty, follow them.\n- If there are no offered times: apologize briefly, share the booking URL only, do not invent times.\n\nSender first name (for greeting): {{ $('Compute Free Slots').first().json.sender_first_name }}\nSubject: {{ $('Compute Free Slots').first().json.subject }}\nFrom: {{ $('Compute Free Slots').first().json.from_email }}\n\nTheir message:\n{{ $('Compute Free Slots').first().json.raw_text }}\n\nAvailability instructions (may be empty):\n{{ $('Compute Free Slots').first().json.availability_hint }}\n\nOffered times (JSON): {{ JSON.stringify($('Compute Free Slots').first().json.slots || []) }}\nBooking page: {{ $('Compute Free Slots').first().json.booking_url }}",
+        "batching": {}
+      },
+      "id": "745f9164-0e9a-489c-ae66-75d068e48dac",
+      "name": "LLM: Draft Meeting",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        3080,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const slot = $('Compute Free Slots').first().json;\nconst p = $('Parse Triage').first().json;\nconst from = String(slot.from_email || '');\nlet senderFirst = String(slot.sender_first_name || '').trim();\nif (!senderFirst) {\n  const q = from.match(/^([^<]+)</);\n  if (q) senderFirst = q[1].trim().replace(/^[\"']+|[\"']+$/g, '').split(/\\s+/)[0];\n  if (!senderFirst) senderFirst = from.split('@')[0].split(/[._+-]/)[0] || 'there';\n}\nfunction buildLinkOnlyBody() {\n  const when = slot.requested_summary || 'the time you asked for';\n  const url = String(slot.booking_url || '').trim();\n  const greet = (senderFirst && senderFirst !== 'there') ? ('Hi ' + senderFirst + ',') : 'Hi,';\n  return greet + '\\n\\nThanks for suggesting ' + when + '. That time does not work on my side from this inbox (calendar conflict, outside my working hours, or I am at my limit for automated holds).\\n\\nPlease pick a time using my booking page. Completing the booking creates the calendar invite:\\n' + url + '\\n\\nIf you prefer, reply with a few alternatives and we will align manually.\\n\\nBest regards';\n}\nlet draft_body;\nif (slot.booking_link_only === true) {\n  draft_body = buildLinkOnlyBody();\n} else {\n  const r = $input.first().json;\n  draft_body = String(r.text || r.output || r.response || r.choices?.[0]?.message?.content || '').trim();\n}\nconst sl = (slot.slots || [])[0];\nreturn [{ json: {\n  email_id: slot.email_id,\n  msg_id: slot.msg_id,\n  thread_id: slot.thread_id,\n  from_email: slot.from_email,\n  subject: slot.subject,\n  confidence: p.confidence,\n  send_threshold_met: p.send_threshold_met === true,\n  draft_body,\n  slots: slot.slots || [],\n  has_slots: slot.has_slots === true,\n  availability_hint: String(slot.availability_hint || ''),\n  first_slot_display: sl && sl.display ? sl.display : '',\n  auto_book_eligible: slot.auto_book_eligible === true,\n  booking_link_only: slot.booking_link_only === true,\n  sender_first_name: senderFirst\n} }];"
+      },
+      "id": "c2eefb4b-b86d-4097-a3b8-c81695273f67",
+      "name": "Merge Meeting Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ms",
+              "leftValue": "={{ $json.send_threshold_met === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8f6d42ae-85fd-469e-86af-49fed9aacd0d",
+      "name": "Meeting Send OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3520,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "emailType": "text",
+        "messageId": "={{ $json.msg_id }}",
+        "message": "={{ $json.draft_body }}",
+        "options": {}
+      },
+      "id": "65725d30-08af-43c7-8f00-27bff7a4b29d",
+      "name": "Gmail Send Meeting",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3740,
+        280
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CONFIGURE_GMAIL",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "hs",
+              "leftValue": "={{ $('Merge Meeting Draft').item.json.auto_book_eligible === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f31dc5f1-cfab-4740-b783-c3a0f5ab7d8e",
+      "name": "Has Valid Slots?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3960,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "start": "={{ $('Merge Meeting Draft').item.json.slots[0].start }}",
+        "end": "={{ $('Merge Meeting Draft').item.json.slots[0].end }}",
+        "additionalFields": {
+          "summary": "={{ 'Meeting: ' + ($('Merge Meeting Draft').item.json.subject || 'Guest').slice(0, 80) }}",
+          "description": "={{ 'Guest: ' + $('Merge Meeting Draft').item.json.from_email + '\\n\\n(AI triage auto-booked from free slot.)' }}"
+        }
+      },
+      "id": "612ecbf2-ec74-49a9-9cc8-b6197921ebf6",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        4180,
+        200
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "CONFIGURE_CAL",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#meetings",
+          "mode": "name"
+        },
+        "text": "={{ '*Meeting booked (auto)*\\n' + 'With: ' + $('Merge Meeting Draft').first().json.from_email + '\\nTopic: ' + ($('Merge Meeting Draft').first().json.subject || '') + '\\nWhen: ' + (($('Merge Meeting Draft').first().json.slots[0] || {}).display || ($('Merge Meeting Draft').first().json.slots[0] || {}).start || 'n/a') }}",
+        "otherOptions": {}
+      },
+      "id": "b4e32245-3d3d-40e4-8db7-043970f2f932",
+      "name": "Slack: Meeting Booked",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        4340,
+        200
+      ],
+      "webhookId": "12b4894d-9089-4ea4-bf2a-f5c2860ba243",
+      "continueOnFail": true,
+      "credentials": {
+        "slackApi": {
+          "id": "CONFIGURE_SLACK",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'sent', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Merge Meeting Draft').item.json.email_id] }}"
+        }
+      },
+      "id": "084a29b9-6ed5-4387-83fc-d5afd204045c",
+      "name": "Mark Sent Meeting",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4520,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO processing_events (email_id, step, payload) VALUES ($1::uuid, $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Merge Meeting Draft').item.json.email_id,\n  'sent_meeting',\n  JSON.stringify({\n    calendar_created: $('Merge Meeting Draft').item.json.auto_book_eligible === true,\n    slot_start: ($('Merge Meeting Draft').item.json.slots[0] || {}).start || null,\n    slot_display: ($('Merge Meeting Draft').item.json.slots[0] || {}).display || null,\n    from_email: $('Merge Meeting Draft').item.json.from_email,\n    subject: $('Merge Meeting Draft').item.json.subject\n  })\n] }}"
+        }
+      },
+      "id": "0ecba7ab-66ac-4d6e-a67c-162e0a0d0f52",
+      "name": "Log Sent Meeting",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4740,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE emails SET status = 'processed', updated_at = now() WHERE id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [$('Merge Meeting Draft').item.json.email_id] }}"
+        }
+      },
+      "id": "81071e3b-1622-4540-a1da-3faf758153ff",
+      "name": "Mark Processed Meeting No Send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3740,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "CONFIGURE_POSTGRES",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Fields": {
+      "main": [
+        [
+          {
+            "node": "Decode Email Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Email Text": {
+      "main": [
+        [
+          {
+            "node": "Postgres Insert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Insert Email": {
+      "main": [
+        [
+          {
+            "node": "Is New Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Email?": {
+      "main": [
+        [
+          {
+            "node": "Store Email Record ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Email Record ID": {
+      "main": [
+        [
+          {
+            "node": "LLM: Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Triage": {
+      "main": [
+        [
+          {
+            "node": "Parse Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Triage": {
+      "main": [
+        [
+          {
+            "node": "Save Triage To DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Triage To DB": {
+      "main": [
+        [
+          {
+            "node": "Log Triage Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Triage Event": {
+      "main": [
+        [
+          {
+            "node": "Low Triage Confidence?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Low Triage Confidence?": {
+      "main": [
+        [
+          {
+            "node": "Mark Processed No Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Noise?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Processed No Send": {
+      "main": [
+        [
+          {
+            "node": "Log Skip Low Conf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Noise?": {
+      "main": [
+        [
+          {
+            "node": "Mark Ignored",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Operational?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Ignored": {
+      "main": [
+        [
+          {
+            "node": "Log Noise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Operational?": {
+      "main": [
+        [
+          {
+            "node": "LLM: Draft Operational",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Meeting: Scheduling Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meeting: Scheduling Ready?": {
+      "main": [
+        [
+          {
+            "node": "Postgres: Booked Slot Times",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM: Meeting Clarify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Meeting Clarify": {
+      "main": [
+        [
+          {
+            "node": "Extract Clarify Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Clarify Draft": {
+      "main": [
+        [
+          {
+            "node": "Clarify Send OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clarify Send OK?": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Clarify",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Processed Clarify No Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Clarify": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent Clarify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Sent Clarify": {
+      "main": [
+        [
+          {
+            "node": "Log Sent Clarify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres: Booked Slot Times": {
+      "main": [
+        [
+          {
+            "node": "Get Calendar Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Draft Operational": {
+      "main": [
+        [
+          {
+            "node": "Extract Operational Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Operational Draft": {
+      "main": [
+        [
+          {
+            "node": "Operational Send OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Operational Send OK?": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Operational",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Processed Op No Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Operational": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent Operational",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Sent Operational": {
+      "main": [
+        [
+          {
+            "node": "Log Sent Operational",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Calendar Events": {
+      "main": [
+        [
+          {
+            "node": "Compute Free Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Free Slots": {
+      "main": [
+        [
+          {
+            "node": "Meeting: Booking Link Only?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meeting: Booking Link Only?": {
+      "main": [
+        [
+          {
+            "node": "Merge Meeting Draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM: Draft Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Draft Meeting": {
+      "main": [
+        [
+          {
+            "node": "Merge Meeting Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Meeting Draft": {
+      "main": [
+        [
+          {
+            "node": "Meeting Send OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meeting Send OK?": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Processed Meeting No Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send Meeting": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Slots?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Slots?": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Sent Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Slack: Meeting Booked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Meeting Booked": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Sent Meeting": {
+      "main": [
+        [
+          {
+            "node": "Log Sent Meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat: Triage": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM: Triage",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat: Operational": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM: Draft Operational",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat: Meeting": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM: Draft Meeting",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat: Meeting Clarify": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM: Meeting Clarify",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Africa/Lagos"
+  },
+  "versionId": "a17709c5-0f00-4aa1-b0b1-f9f4512da941",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "e2e99e3d-4aa8-4e08-bbf5-a113f33c4cbc",
+  "tags": []
+}
